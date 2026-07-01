@@ -18,10 +18,11 @@ Requires Neovim >= 0.10.
 
 ### `:GitTool diff`
 
-Directory-level diff in a dedicated tab: a quickfix list of changed paths
-drives a side-by-side native diff (left: base, right: target). Navigate the
-quickfix list (`:cnext` / `:cprev` or `<CR>` in the quickfix window) and the
-diff panes follow.
+Directory-level diff in a dedicated tab: a location list of changed paths
+(owned by the right diff window) drives a side-by-side native diff (left:
+base, right: target). Navigate the location list (`:lnext` / `:lprev` from
+the right window, or `<CR>` in the location-list window) and the diff panes
+follow. Each invocation opens its own tab; existing diff tabs stay open.
 
 | Invocation | Compares |
 |---|---|
