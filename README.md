@@ -1,13 +1,14 @@
 # gittools.nvim
 
 A git front end built entirely on Neovim's **native** diff facilities — no
-external diff tool, no floating-window framework. One command, four
+external diff tool, no floating-window framework. One command, five
 subcommands:
 
 ```
 :GitTool diff [--staged] [<rev> [<rev>]]
 :GitTool diffthis [<rev>]
 :GitTool log [<rev>] [-- <path>]
+:GitTool graph [<rev>] [-- <path>]
 :GitTool blame
 ```
 
@@ -41,15 +42,15 @@ index; pass a revision to compare against that instead) is a read-only scratch
 buffer on the left; the live buffer stays on the right, so the diff tracks
 your edits as you type. Close either window to end the diff.
 
-### `:GitTool log`
+### `:GitTool log` and `:GitTool graph`
 
-Interactive commit history in a bottom split. Without a path it walks the real
-parent/child graph from `HEAD` (merge branches nest as collapsible lanes);
-with `-- <path>` it is a flat list of commits touching that path.
+Interactive commit history in a bottom split, starting from `<rev>` (default
+`HEAD`) and optionally limited to commits touching `<path>`. `log` is a flat
+list; `graph` prefixes each commit with `git log --graph`'s rail drawing, so
+branch and merge topology stays visible.
 
 | Key | Action |
 |---|---|
-| `<CR>` | expand / collapse a lane |
 | `<Tab>` | flag / unflag the commit under the cursor |
 | `gd` | diff: flagged commit ↔ commit under cursor, or commit ↔ its first parent when nothing is flagged |
 | `q` | close the log |

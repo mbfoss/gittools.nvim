@@ -12,8 +12,10 @@ local blame    = require("gittools.blame")
 ---                                             difftool (quickfix + layout)
 ---   GitTool diffthis [<rev>]                  diff the current buffer (incl.
 ---                                             unsaved edits) in a side split
----   GitTool log [<rev>] [-- <path>]            browse commit history as an
----                                             interactive tree/graph
+---   GitTool log [<rev>] [-- <path>]           browse commit history as an
+---                                             interactive flat list
+---   GitTool graph [<rev>] [-- <path>]         like log, but with `git log
+---                                             --graph` rail drawing
 ---   GitTool blame                             annotate the current buffer in
 ---                                             a scroll-bound blame sidebar
 --- This module owns only command registration and argument parsing; the work
@@ -63,6 +65,7 @@ end
 local _USAGE = "Usage: GitTool diff [--staged] [<rev> [<rev>]]\n"
     .. "       GitTool diffthis [<rev>]\n"
     .. "       GitTool log [<rev>] [-- <path>]\n"
+    .. "       GitTool graph [<rev>] [-- <path>]\n"
     .. "       GitTool blame"
 
 --- Register `:GitTool`. Auto-called by the central module loader.
@@ -85,17 +88,18 @@ function M.setup()
                 return
             end
             diffthis.diffthis({ rev = revs[1] })
-        elseif sub == "log" then
+        elseif sub == "log" or sub == "graph" then
             local revs, paths = _split_sep({ unpack(args, 2) })
             if #revs > 1 then
-                _notify("GitTool log takes at most one revision", vim.log.levels.ERROR)
+                _notify("GitTool " .. sub .. " takes at most one revision", vim.log.levels.ERROR)
                 return
             end
             if #paths > 1 then
-                _notify("GitTool log takes at most one path", vim.log.levels.ERROR)
+                _notify("GitTool " .. sub .. " takes at most one path", vim.log.levels.ERROR)
                 return
             end
-            logtool.log({ rev = revs[1], path = paths[1] })
+            local fn = sub == "log" and logtool.log or logtool.graph
+            fn({ rev = revs[1], path = paths[1] })
         elseif sub == "blame" then
             if args[2] then
                 _notify("GitTool blame takes no arguments", vim.log.levels.ERROR)
@@ -108,7 +112,7 @@ function M.setup()
     end, {
         desc          = "Git diff via Neovim's native diff tools",
         subcommand_fn = function(_, rest, arg_lead)
-            if #rest == 0 then return { "diff", "diffthis", "log", "blame" } end
+            if #rest == 0 then return { "diff", "diffthis", "log", "graph", "blame" } end
 
             local sub = rest[1]
             if sub == "diff" then
@@ -125,7 +129,7 @@ function M.setup()
                 return out
             elseif sub == "diffthis" then
                 return git.refs()
-            elseif sub == "log" then
+            elseif sub == "log" or sub == "graph" then
                 local has_sep = false
                 for _, a in ipairs(rest) do
                     if a == "--" then has_sep = true end
