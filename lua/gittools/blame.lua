@@ -150,9 +150,9 @@ local function _diff_commit(root, entry)
         return
     end
     if git.verify_rev(root, entry.hash .. "^") then
-        difftool.diff({ revs = { entry.hash .. "^", entry.hash } })
+        difftool.diff({ revs = { entry.hash .. "^", entry.hash }, root = root })
     else
-        difftool.diff({ revs = { _EMPTY_TREE, entry.hash } })
+        difftool.diff({ revs = { _EMPTY_TREE, entry.hash }, root = root })
     end
 end
 

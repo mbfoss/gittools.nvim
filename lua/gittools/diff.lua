@@ -293,6 +293,7 @@ end
 ---@class GitTools.DiffOpts
 ---@field staged boolean?  compare the index instead of the working tree
 ---@field revs   string[]? zero, one, or two revisions (see git-diff semantics)
+---@field root   string?   repo root to diff in (default: the root containing the editor's cwd)
 
 --- Diff the requested revisions/index/working-tree sides in a dedicated tab,
 --- driving a quickfix list of changed paths and a side-by-side native diff.
@@ -310,7 +311,7 @@ function M.diff(opts)
     ---@cast left GitTools.Side
     ---@cast right GitTools.Side
 
-    local root = git.root()
+    local root = opts.root or git.root()
     if not root then
         _notify("Not inside a git repository", vim.log.levels.WARN)
         return

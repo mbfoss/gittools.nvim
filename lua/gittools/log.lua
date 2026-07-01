@@ -171,14 +171,14 @@ end
 local function _diff_from_cursor(session, entry)
     local flagged = session.flagged
     if flagged and flagged ~= entry.hash then
-        difftool.diff({ revs = { flagged, entry.hash } })
+        difftool.diff({ revs = { flagged, entry.hash }, root = session.root })
         return
     end
     local parent = entry.parents[1]
     if parent and git.verify_rev(session.root, parent) then
-        difftool.diff({ revs = { parent, entry.hash } })
+        difftool.diff({ revs = { parent, entry.hash }, root = session.root })
     else
-        difftool.diff({ revs = { _EMPTY_TREE, entry.hash } })
+        difftool.diff({ revs = { _EMPTY_TREE, entry.hash }, root = session.root })
     end
 end
 
@@ -212,7 +212,7 @@ local function _show(session)
     session.win = win
     _session = session
 
-    vim.keymap.set("n", "gd", function()
+    vim.keymap.set("n", "<CR>", function()
         local entry = _entry_at_cursor(session)
         if not entry then return end
         _diff_from_cursor(session, entry)
