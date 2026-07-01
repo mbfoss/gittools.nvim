@@ -4,14 +4,17 @@ local usercmd  = require("gittools.util.usercmd")
 local git      = require("gittools.git")
 local difftool = require("gittools.diff")
 local diffthis = require("gittools.diffthis")
+local logtool  = require("gittools.log")
 
 --- `:GitTool` -- a git-backed front end for Neovim's native diff facilities.
 ---   GitTool diff [--staged] [<rev> [<rev>]]   directory diff via the built-in
 ---                                             difftool (quickfix + layout)
 ---   GitTool diffthis [<rev>]                  diff the current buffer (incl.
 ---                                             unsaved edits) in a side split
+---   GitTool log [<rev>] [-- <path>]            browse commit history as an
+---                                             interactive tree/graph
 --- This module owns only command registration and argument parsing; the work
---- lives in `gittools.diff` / `gittools.diffthis`.
+--- lives in `gittools.diff` / `gittools.diffthis` / `gittools.log`.
 
 local _AUGROUP = "gittools"
 
@@ -39,8 +42,23 @@ local function _parse_flags(args)
     return staged, revs
 end
 
+--- Split `args` at a literal `--` into the positionals before it and after
+--- it, mirroring git's own `<rev> -- <path>` convention.
+---@param args string[]
+---@return string[] before
+---@return string[] after
+local function _split_sep(args)
+    for i, a in ipairs(args) do
+        if a == "--" then
+            return { unpack(args, 1, i - 1) }, { unpack(args, i + 1) }
+        end
+    end
+    return args, {}
+end
+
 local _USAGE = "Usage: GitTool diff [--staged] [<rev> [<rev>]]\n"
-    .. "       GitTool diffthis [<rev>]"
+    .. "       GitTool diffthis [<rev>]\n"
+    .. "       GitTool log [<rev>] [-- <path>]"
 
 --- Register `:GitTool`. Auto-called by the central module loader.
 function M.setup()
@@ -62,13 +80,24 @@ function M.setup()
                 return
             end
             diffthis.diffthis({ rev = revs[1] })
+        elseif sub == "log" then
+            local revs, paths = _split_sep({ unpack(args, 2) })
+            if #revs > 1 then
+                _notify("GitTool log takes at most one revision", vim.log.levels.ERROR)
+                return
+            end
+            if #paths > 1 then
+                _notify("GitTool log takes at most one path", vim.log.levels.ERROR)
+                return
+            end
+            logtool.log({ rev = revs[1], path = paths[1] })
         else
             _notify(_USAGE, vim.log.levels.WARN)
         end
     end, {
         desc          = "Git diff via Neovim's native diff tools",
-        subcommand_fn = function(_, rest)
-            if #rest == 0 then return { "diff", "diffthis" } end
+        subcommand_fn = function(_, rest, arg_lead)
+            if #rest == 0 then return { "diff", "diffthis", "log" } end
 
             local sub = rest[1]
             if sub == "diff" then
@@ -85,6 +114,17 @@ function M.setup()
                 return out
             elseif sub == "diffthis" then
                 return git.refs()
+            elseif sub == "log" then
+                local has_sep = false
+                for _, a in ipairs(rest) do
+                    if a == "--" then has_sep = true end
+                end
+                if has_sep then
+                    return vim.fn.getcompletion(arg_lead, "file")
+                end
+                local out = { "--" }
+                vim.list_extend(out, git.refs())
+                return out
             end
             return {}
         end,

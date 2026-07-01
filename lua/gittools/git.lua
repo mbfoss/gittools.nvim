@@ -48,12 +48,14 @@ function M.root(cwd)
     return (M.run(cwd or vim.uv.cwd() or ".", { "rev-parse", "--show-toplevel" }))
 end
 
---- Whether `rev` resolves to a commit in `root`.
+--- Whether `rev` resolves to a tree-ish (commit, tag, or tree object) in
+--- `root`. Tree-ish rather than commit-only so this also accepts the
+--- well-known empty-tree SHA used to diff a repository's root commit.
 ---@param root string
 ---@param rev  string
 ---@return boolean
 function M.verify_rev(root, rev)
-    return M.run(root, { "rev-parse", "--verify", "--quiet", rev .. "^{commit}" }) ~= nil
+    return M.run(root, { "rev-parse", "--verify", "--quiet", rev .. "^{tree}" }) ~= nil
 end
 
 --- Local branch and tag names (plus `HEAD`) offered as revision completions.
