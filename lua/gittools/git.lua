@@ -20,16 +20,21 @@ function M.run(cwd, args)
 end
 
 --- Like `run`, but returns raw (untrimmed) stdout, so file blobs keep their
---- exact bytes (notably a trailing newline). Returns nil on failure.
----@param cwd  string
----@param args string[]
+--- exact bytes (notably a trailing newline). Returns nil plus trimmed stderr
+--- on failure. `stdin`, when given, is piped to git (e.g. `blame --contents -`).
+---@param cwd   string
+---@param args  string[]
+---@param stdin string?
 ---@return string? stdout
-function M.run_raw(cwd, args)
+---@return string? stderr
+function M.run_raw(cwd, args, stdin)
     local cmd = { "git" }
     vim.list_extend(cmd, args)
-    local res = vim.system(cmd, { text = true, cwd = cwd }):wait()
-    if res.code ~= 0 then return nil end
-    return res.stdout or ""
+    local res = vim.system(cmd, { text = true, cwd = cwd, stdin = stdin }):wait()
+    if res.code ~= 0 then
+        return nil, vim.trim(res.stderr or "")
+    end
+    return res.stdout or "", nil
 end
 
 --- Split git's newline-delimited path output into a list, dropping blanks.

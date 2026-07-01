@@ -5,6 +5,7 @@ local git      = require("gittools.git")
 local difftool = require("gittools.diff")
 local diffthis = require("gittools.diffthis")
 local logtool  = require("gittools.log")
+local blame    = require("gittools.blame")
 
 --- `:GitTool` -- a git-backed front end for Neovim's native diff facilities.
 ---   GitTool diff [--staged] [<rev> [<rev>]]   directory diff via the built-in
@@ -13,8 +14,11 @@ local logtool  = require("gittools.log")
 ---                                             unsaved edits) in a side split
 ---   GitTool log [<rev>] [-- <path>]            browse commit history as an
 ---                                             interactive tree/graph
+---   GitTool blame                             annotate the current buffer in
+---                                             a scroll-bound blame sidebar
 --- This module owns only command registration and argument parsing; the work
---- lives in `gittools.diff` / `gittools.diffthis` / `gittools.log`.
+--- lives in `gittools.diff` / `gittools.diffthis` / `gittools.log` /
+--- `gittools.blame`.
 
 local _AUGROUP = "gittools"
 
@@ -58,7 +62,8 @@ end
 
 local _USAGE = "Usage: GitTool diff [--staged] [<rev> [<rev>]]\n"
     .. "       GitTool diffthis [<rev>]\n"
-    .. "       GitTool log [<rev>] [-- <path>]"
+    .. "       GitTool log [<rev>] [-- <path>]\n"
+    .. "       GitTool blame"
 
 --- Register `:GitTool`. Auto-called by the central module loader.
 function M.setup()
@@ -91,13 +96,19 @@ function M.setup()
                 return
             end
             logtool.log({ rev = revs[1], path = paths[1] })
+        elseif sub == "blame" then
+            if args[2] then
+                _notify("GitTool blame takes no arguments", vim.log.levels.ERROR)
+                return
+            end
+            blame.blame()
         else
             _notify(_USAGE, vim.log.levels.WARN)
         end
     end, {
         desc          = "Git diff via Neovim's native diff tools",
         subcommand_fn = function(_, rest, arg_lead)
-            if #rest == 0 then return { "diff", "diffthis", "log" } end
+            if #rest == 0 then return { "diff", "diffthis", "log", "blame" } end
 
             local sub = rest[1]
             if sub == "diff" then

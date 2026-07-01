@@ -235,6 +235,12 @@ function M.log(opts)
     local win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, buf)
     vim.api.nvim_win_set_height(win, math.min(20, #order))
+    -- A new split inherits window-local options (scrollbind, cursorbind, ...)
+    -- from the window it split off of; reset them so the log split can't end
+    -- up scroll-linked to the buffer the user opened it from (e.g. a leftover
+    -- `:GitTool blame` sidebar with scrollbind still on).
+    vim.wo[win].scrollbind = false
+    vim.wo[win].cursorbind = false
 
     session.win = win
     _session = session
@@ -249,12 +255,13 @@ function M.log(opts)
         local item = tb:get_cursor_item()
         if not item then return end
         local old = session.flagged
-        session.flagged = item.data.hash
+        -- Re-flagging the same commit clears the flag (toggle).
+        session.flagged = old ~= item.data.hash and item.data.hash or nil
         if old then tb:refresh_item(old) end
-        tb:refresh_item(session.flagged)
-    end, { buffer = buf })
+        if session.flagged then tb:refresh_item(session.flagged) end
+    end, { buffer = buf, desc = "Toggle flag on commit for diffing" })
 
-    vim.keymap.set("n", "q", _end_log, { buffer = buf })
+    vim.keymap.set("n", "q", _end_log, { buffer = buf, desc = "Close log" })
 end
 
 return M
