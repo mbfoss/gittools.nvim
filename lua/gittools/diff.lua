@@ -56,21 +56,69 @@ for _, pair in pairs(_STATUS_HL) do
     vim.api.nvim_set_hl(0, pair[1], { link = pair[2], default = true })
 end
 
--- Nerd Font "arrow-right" (nf-fa-arrow_right), used in place of a plain "->"
--- between the old and new path of a rename/copy entry.
-local _RENAME_ARROW = vim.fn.nr2char(0xf061)
+-- Unicode "rightwards arrow", used in place of a plain "->" between the old
+-- and new path of a rename/copy entry. Deliberately not a heavier Nerd Font
+-- glyph (e.g. nf-fa-arrow_right): this reads lighter at a glance and needs
+-- no patched font.
+local _RENAME_ARROW = vim.fn.nr2char(0x2192)
 local _RENAME_ARROW_PAT = vim.fn.escape(_RENAME_ARROW, [[/\.*$^~[]])
 
 vim.api.nvim_set_hl(0, "GitToolsRenameArrow", { link = "GitToolsStatusRenamed", default = true })
 vim.api.nvim_set_hl(0, "GitToolsRenameOldPath", { link = "Comment", default = true })
 
---- The "old -> new" label for a rename/copy entry, joined with a highlighted
---- arrow icon rather than plain "->".
+---@param path string
+---@return string[]
+local function _path_segments(path)
+    local segs = {}
+    for seg in path:gmatch("[^/]+") do
+        segs[#segs + 1] = seg
+    end
+    return segs
+end
+
+--- The label for a rename/copy entry. Mirrors git's own condensed rename
+--- display: path segments shared between the old and new path (a common
+--- prefix and/or suffix, e.g. a directory both paths live in, or a filename
+--- both paths share) are printed once, with only the part that actually
+--- changed shown inside `{old -> new}`. Falls back to the full "old -> new"
+--- form when the two paths share no whole segment.
 ---@param old_rel string
 ---@param new_rel string
 ---@return string
 local function _rename_label(old_rel, new_rel)
-    return string.format("%s %s %s", old_rel, _RENAME_ARROW, new_rel)
+    local old_segs, new_segs = _path_segments(old_rel), _path_segments(new_rel)
+    local n_old, n_new = #old_segs, #new_segs
+
+    local prefix = 0
+    while prefix < n_old and prefix < n_new and old_segs[prefix + 1] == new_segs[prefix + 1] do
+        prefix = prefix + 1
+    end
+
+    local suffix = 0
+    while suffix < (n_old - prefix) and suffix < (n_new - prefix)
+        and old_segs[n_old - suffix] == new_segs[n_new - suffix] do
+        suffix = suffix + 1
+    end
+
+    if prefix == 0 and suffix == 0 then
+        return string.format("%s %s %s", old_rel, _RENAME_ARROW, new_rel)
+    end
+
+    local mid_old, mid_new = {}, {}
+    for i = prefix + 1, n_old - suffix do mid_old[#mid_old + 1] = old_segs[i] end
+    for i = prefix + 1, n_new - suffix do mid_new[#mid_new + 1] = new_segs[i] end
+
+    local parts = {}
+    if prefix > 0 then
+        parts[#parts + 1] = table.concat(old_segs, "/", 1, prefix) .. "/"
+    end
+    parts[#parts + 1] = string.format(
+        "{%s %s %s}", table.concat(mid_old, "/"), _RENAME_ARROW, table.concat(mid_new, "/"))
+    if suffix > 0 then
+        parts[#parts + 1] = "/" .. table.concat(old_segs, "/", n_old - suffix + 1, n_old)
+    end
+
+    return table.concat(parts)
 end
 
 --- Color each location-list line by its leading status letter (see
@@ -86,8 +134,11 @@ local function _highlight_loclist(bufnr)
             vim.cmd(string.format("syntax match %s /%s/", pair[1], pattern))
         end
         vim.cmd(string.format([[syntax match GitToolsRenameArrow /%s/]], _RENAME_ARROW_PAT))
+        vim.cmd([[syntax match GitToolsRenameArrow /[{}]/]])
         vim.cmd(string.format(
-            [[syntax match GitToolsRenameOldPath /^[RC] \zs.\{-}\ze %s/]], _RENAME_ARROW_PAT))
+            [[syntax match GitToolsRenameOldPath /{\zs.\{-}\ze %s/]], _RENAME_ARROW_PAT))
+        vim.cmd(string.format(
+            [[syntax match GitToolsRenameOldPath /^[RC] \zs[^{]\{-}\ze %s/]], _RENAME_ARROW_PAT))
     end)
 end
 
