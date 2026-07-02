@@ -110,7 +110,7 @@ local function _entry_chunks(session, entry)
             chunks[#chunks + 1] = { "» ", "WarningMsg" }
         end
         chunks[#chunks + 1] = { entry.hash:sub(1, 7), "Comment" }
-        chunks[#chunks + 1] = { " " .. entry.date .. " ", "Number" }
+        chunks[#chunks + 1] = { " " .. entry.date .. " ", "DiagnosticHint" }
         chunks[#chunks + 1] = { entry.subject, "Normal" }
     end
     return chunks

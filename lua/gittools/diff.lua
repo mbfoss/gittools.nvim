@@ -34,6 +34,41 @@ local _ENTRY_KEY = "gittools.diff"
 local _sessions  = {}
 local _next_id   = 0
 
+-- Status letters (mirroring `git status --short`) rendered at the start of
+-- each location-list line, and the highlight group each links to by default.
+-- Linked to the builtin `Diagnostic*` groups rather than `Diff*`: those are
+-- mostly background fills meant for whole lines, so on a single character
+-- they read as an easy-to-miss colored speck (only `Title`, used for R/C in
+-- an earlier pass, was ever visible). `Diagnostic*` groups are foreground
+-- colors instead, so a single highlighted letter still stands out, and
+-- they're guaranteed to exist in any Neovim >= 0.6 regardless of colorscheme.
+-- `default = true` lets colorschemes/users override without editing here.
+local _STATUS_HL = {
+    A = { "GitToolsStatusAdded",     "DiagnosticOk" },
+    M = { "GitToolsStatusModified",  "DiagnosticWarn" },
+    D = { "GitToolsStatusDeleted",   "DiagnosticError" },
+    R = { "GitToolsStatusRenamed",   "DiagnosticInfo" },
+    C = { "GitToolsStatusCopied",    "DiagnosticHint" },
+    ["?"] = { "GitToolsStatusUntracked", "Comment" },
+}
+
+for _, pair in pairs(_STATUS_HL) do
+    vim.api.nvim_set_hl(0, pair[1], { link = pair[2], default = true })
+end
+
+--- Color each location-list line by its leading status letter (see
+--- `_STATUS_HL`). Scoped to `bufnr` alone so it can't bleed into unrelated
+--- quickfix/location-list windows elsewhere in the session.
+---@param bufnr integer
+local function _highlight_loclist(bufnr)
+    vim.api.nvim_buf_call(bufnr, function()
+        for status, pair in pairs(_STATUS_HL) do
+            local pattern = status == "?" and [[^?]] or ("^" .. status .. [[\>]])
+            vim.cmd(string.format("syntax match %s /%s/", pair[1], pattern))
+        end
+    end)
+end
+
 ---@param msg string
 ---@param level integer?
 local function _notify(msg, level)
@@ -473,6 +508,10 @@ function M.diff(opts)
 
     -- The loclist window can only be opened once its window has a list.
     vim.api.nvim_win_call(session.right_win, function() vim.cmd("botright lopen") end)
+    local llwin = vim.fn.getloclist(session.right_win, { winid = 0 }).winid
+    if llwin ~= 0 then
+        _highlight_loclist(vim.api.nvim_win_get_buf(llwin))
+    end
     vim.api.nvim_set_current_win(session.right_win)
     vim.cmd.lfirst()
 end
