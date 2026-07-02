@@ -56,9 +56,28 @@ for _, pair in pairs(_STATUS_HL) do
     vim.api.nvim_set_hl(0, pair[1], { link = pair[2], default = true })
 end
 
+-- Nerd Font "arrow-right" (nf-fa-arrow_right), used in place of a plain "->"
+-- between the old and new path of a rename/copy entry.
+local _RENAME_ARROW = vim.fn.nr2char(0xf061)
+local _RENAME_ARROW_PAT = vim.fn.escape(_RENAME_ARROW, [[/\.*$^~[]])
+
+vim.api.nvim_set_hl(0, "GitToolsRenameArrow", { link = "GitToolsStatusRenamed", default = true })
+vim.api.nvim_set_hl(0, "GitToolsRenameOldPath", { link = "Comment", default = true })
+
+--- The "old -> new" label for a rename/copy entry, joined with a highlighted
+--- arrow icon rather than plain "->".
+---@param old_rel string
+---@param new_rel string
+---@return string
+local function _rename_label(old_rel, new_rel)
+    return string.format("%s %s %s", old_rel, _RENAME_ARROW, new_rel)
+end
+
 --- Color each location-list line by its leading status letter (see
---- `_STATUS_HL`). Scoped to `bufnr` alone so it can't bleed into unrelated
---- quickfix/location-list windows elsewhere in the session.
+--- `_STATUS_HL`). Rename/copy lines additionally get their arrow colored to
+--- match the status letter, and the superseded (old) path dimmed. Scoped to
+--- `bufnr` alone so it can't bleed into unrelated quickfix/location-list
+--- windows elsewhere in the session.
 ---@param bufnr integer
 local function _highlight_loclist(bufnr)
     vim.api.nvim_buf_call(bufnr, function()
@@ -66,6 +85,9 @@ local function _highlight_loclist(bufnr)
             local pattern = status == "?" and [[^?]] or ("^" .. status .. [[\>]])
             vim.cmd(string.format("syntax match %s /%s/", pair[1], pattern))
         end
+        vim.cmd(string.format([[syntax match GitToolsRenameArrow /%s/]], _RENAME_ARROW_PAT))
+        vim.cmd(string.format(
+            [[syntax match GitToolsRenameOldPath /^[RC] \zs.\{-}\ze %s/]], _RENAME_ARROW_PAT))
     end)
 end
 
@@ -495,7 +517,7 @@ function M.diff(opts)
                 local label   = e.filename
                 if ud then
                     if ud.left_rel and ud.right_rel and ud.left_rel ~= ud.right_rel then
-                        label = string.format("%s -> %s", ud.left_rel, ud.right_rel)
+                        label = _rename_label(ud.left_rel, ud.right_rel)
                     else
                         label = ud.right_rel or ud.left_rel
                     end
