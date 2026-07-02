@@ -9,8 +9,11 @@ local git = require("gittools.git")
 ---@field worktree boolean? the live working-tree file
 
 ---@class GitTools.EntryData
----@field rel   string          relative path from repo root
----@field root  string          absolute path to repo root
+---@field root      string  absolute path to repo root
+---@field left_rel  string? relative path on the left side; nil if the file
+---                          doesn't exist there (e.g. it was added)
+---@field right_rel string? relative path on the right side; nil if the file
+---                          doesn't exist there (e.g. it was deleted)
 ---@field left  GitTools.Side   how to fetch left content
 ---@field right GitTools.Side   how to fetch right content
 
@@ -91,7 +94,8 @@ end
 ---@param session GitTools.DiffSession
 ---@param root string Repo root
 ---@param side GitTools.Side Side description
----@param rel string Relative path
+---@param rel string? Relative path on this side; nil if the file doesn't
+---                    exist on this side (e.g. it was added or deleted)
 ---@param side_label string "left" or "right"
 ---@param filetype string Syntax highlighting string
 ---@return integer bufnr
@@ -99,20 +103,22 @@ local function _make_git_buf(session, root, side, rel, side_label, filetype)
     local buf = vim.api.nvim_create_buf(false, true)
     local lines = {}
 
-    if side.worktree then
-        local full_path = root .. "/" .. rel
-        local existing = vim.fn.bufnr(full_path)
-        if existing ~= -1 and vim.api.nvim_buf_is_loaded(existing) then
-            lines = vim.api.nvim_buf_get_lines(existing, 0, -1, false)
-        elseif vim.fn.filereadable(full_path) == 1 then
-            lines = vim.fn.readfile(full_path)
-        end
-    else
-        local spec = side.rev and (side.rev .. ":" .. rel) or (":" .. rel)
-        local blob = git.run_raw(root, { "show", spec })
-        if blob then
-            lines = vim.split(blob, "\n", { plain = true })
-            if lines[#lines] == "" then table.remove(lines) end
+    if rel then
+        if side.worktree then
+            local full_path = root .. "/" .. rel
+            local existing = vim.fn.bufnr(full_path)
+            if existing ~= -1 and vim.api.nvim_buf_is_loaded(existing) then
+                lines = vim.api.nvim_buf_get_lines(existing, 0, -1, false)
+            elseif vim.fn.filereadable(full_path) == 1 then
+                lines = vim.fn.readfile(full_path)
+            end
+        else
+            local spec = side.rev and (side.rev .. ":" .. rel) or (":" .. rel)
+            local blob = git.run_raw(root, { "show", spec })
+            if blob then
+                lines = vim.split(blob, "\n", { plain = true })
+                if lines[#lines] == "" then table.remove(lines) end
+            end
         end
     end
 
@@ -127,7 +133,7 @@ local function _make_git_buf(session, root, side, rel, side_label, filetype)
     vim.bo[buf].modified   = false
 
     local name_tag         = side.rev or (side.index and "index" or "worktree")
-    vim.api.nvim_buf_set_name(buf, string.format("git://%d/%s/%s/%s", buf, name_tag, side_label, rel))
+    vim.api.nvim_buf_set_name(buf, string.format("git://%d/%s/%s/%s", buf, name_tag, side_label, rel or "(none)"))
 
     table.insert(session.buffers, buf)
 
@@ -165,17 +171,17 @@ local function _setup_diff(session, entry)
 
     ---@type GitTools.EntryData
     local ud = entry.user_data[_ENTRY_KEY]
-    local filetype = vim.filetype.match({ filename = ud.rel }) or ""
+    local filetype = vim.filetype.match({ filename = ud.right_rel or ud.left_rel }) or ""
 
     local right_buf
-    if ud.right.worktree then
-        right_buf = vim.fn.bufadd(ud.root .. "/" .. ud.rel)
+    if ud.right.worktree and ud.right_rel then
+        right_buf = vim.fn.bufadd(ud.root .. "/" .. ud.right_rel)
         vim.fn.bufload(right_buf)
     else
-        right_buf = _make_git_buf(session, ud.root, ud.right, ud.rel, "right", filetype)
+        right_buf = _make_git_buf(session, ud.root, ud.right, ud.right_rel, "right", filetype)
     end
 
-    local left_buf = _make_git_buf(session, ud.root, ud.left, ud.rel, "left", filetype)
+    local left_buf = _make_git_buf(session, ud.root, ud.left, ud.left_rel, "left", filetype)
 
     vim.api.nvim_win_set_buf(lw, left_buf)
     vim.api.nvim_win_set_buf(rw, right_buf)
@@ -258,51 +264,104 @@ local function _resolve_sides(staged, revs)
     return { index = true }, { worktree = true }
 end
 
---- The set of paths (relative to the repo root) that differ between `left` and
---- `right`. Untracked files are included only when the working tree is the
---- right side (git's own `--name-only` never lists them). When the working tree
---- is the right side, files that only differ via unsaved buffer edits (clean on
---- disk, dirty in a loaded buffer) are also included. Deduped, sorted.
+---@class GitTools.Change
+---@field left_rel  string? path on the left side; nil if the file was added
+---@field right_rel string? path on the right side; nil if the file was deleted
+---@field status     "A"|"M"|"D"|"R"|"C"|"?" single-letter status, mirroring
+---                   `git status --short` (`?` for untracked)
+
+--- Parse `git diff --name-status -M` output into per-file change records,
+--- keeping the old and new paths of a rename/copy distinct instead of
+--- collapsing them into a single name.
+---@param out string?
+---@return GitTools.Change[]
+local function _parse_name_status(out)
+    local changes = {}
+    for _, line in ipairs(git.lines(out)) do
+        local parts  = vim.split(line, "\t", { plain = true })
+        local status = parts[1]:sub(1, 1)
+        if status == "R" or status == "C" then
+            changes[#changes + 1] = { left_rel = parts[2], right_rel = parts[3], status = status }
+        elseif status == "A" then
+            changes[#changes + 1] = { right_rel = parts[2], status = status }
+        elseif status == "D" then
+            changes[#changes + 1] = { left_rel = parts[2], status = status }
+        else
+            changes[#changes + 1] = { left_rel = parts[2], right_rel = parts[2], status = "M" }
+        end
+    end
+    return changes
+end
+
+--- The changes (relative to the repo root) between `left` and `right`, with
+--- renames/copies kept as distinct old/new paths rather than collapsed into
+--- one name (plain `--name-only` reports only the new path, which breaks
+--- diffing against the old content). Untracked files are included only when
+--- the working tree is the right side (git never reports those as a diff
+--- status on its own). When the working tree is the right side, files that
+--- only differ via unsaved buffer edits (clean on disk, dirty in a loaded
+--- buffer) are also included. Deduped, sorted.
 ---@param root  string repo root
 ---@param left  GitTools.Side
 ---@param right GitTools.Side
----@return string[] rels
-function M.changed_paths_between(root, left, right)
+---@return GitTools.Change[] changes
+local function _collect_changes(root, left, right)
     local args, include_untracked
     if right.worktree then
-        args = { "diff", "--name-only" }
+        args = { "diff", "--name-status", "-M" }
         if left.rev then args[#args + 1] = left.rev end
         include_untracked = true
     elseif right.index then
-        args, include_untracked = { "diff", "--name-only", "--cached", left.rev }, false
+        args, include_untracked = { "diff", "--name-status", "-M", "--cached", left.rev }, false
     else
-        args, include_untracked = { "diff", "--name-only", left.rev, right.rev }, false
+        args, include_untracked = { "diff", "--name-status", "-M", left.rev, right.rev }, false
     end
 
-    local seen, rels = {}, {}
-    local function add(rel)
-        if rel ~= "" and not seen[rel] then
-            seen[rel] = true
-            rels[#rels + 1] = rel
+    local seen, changes = {}, {}
+    ---@param change GitTools.Change
+    local function add(change)
+        -- Deletions have no right_rel, so key those on left_rel instead.
+        local key = change.right_rel and ("r:" .. change.right_rel) or ("l:" .. (change.left_rel or ""))
+        if not seen[key] then
+            seen[key] = true
+            changes[#changes + 1] = change
         end
     end
 
-    for _, rel in ipairs(git.lines((git.run(root, args)))) do add(rel) end
+    for _, change in ipairs(_parse_name_status((git.run(root, args)))) do add(change) end
     if include_untracked then
         for _, rel in ipairs(git.lines((git.run(root, { "ls-files", "--others", "--exclude-standard" })))) do
-            add(rel)
+            add({ right_rel = rel, status = "?" })
         end
         for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
             if vim.api.nvim_buf_is_loaded(bufnr)
                 and vim.bo[bufnr].modified
                 and vim.bo[bufnr].buftype == "" then
                 local rel = git.relpath(root, vim.api.nvim_buf_get_name(bufnr))
-                if rel then add(rel) end
+                if rel then add({ left_rel = rel, right_rel = rel, status = "M" }) end
             end
         end
     end
 
-    table.sort(rels)
+    table.sort(changes, function(a, b)
+        return (a.right_rel or a.left_rel) < (b.right_rel or b.left_rel)
+    end)
+    return changes
+end
+
+--- The set of paths (relative to the repo root) that differ between `left`
+--- and `right`. For renames/copies this reports only the new path; use
+--- `_collect_changes` where the old path (for diffing against prior content)
+--- is also needed.
+---@param root  string repo root
+---@param left  GitTools.Side
+---@param right GitTools.Side
+---@return string[] rels
+function M.changed_paths_between(root, left, right)
+    local rels = {}
+    for _, change in ipairs(_collect_changes(root, left, right)) do
+        rels[#rels + 1] = change.right_rel or change.left_rel
+    end
     return rels
 end
 
@@ -349,19 +408,26 @@ function M.diff(opts)
         end
     end
 
-    local rels = M.changed_paths_between(root, left, right)
-    if #rels == 0 then
+    local changes = _collect_changes(root, left, right)
+    if #changes == 0 then
         _notify("No changes found")
         return
     end
 
     local entries = {}
-    for _, rel in ipairs(rels) do
+    for _, change in ipairs(changes) do
+        local display = change.right_rel or change.left_rel
         entries[#entries + 1] = {
-            filename  = root .. "/" .. rel,
-            text      = "±",
+            filename  = root .. "/" .. display,
+            text      = change.status,
             user_data = {
-                [_ENTRY_KEY] = { root = root, rel = rel, left = left, right = right }
+                [_ENTRY_KEY] = {
+                    root      = root,
+                    left_rel  = change.left_rel,
+                    right_rel = change.right_rel,
+                    left      = left,
+                    right     = right,
+                }
             }
         }
     end
@@ -391,7 +457,15 @@ function M.diff(opts)
             for i = info.start_idx, info.end_idx do
                 local e       = items[i]
                 local ud      = e.user_data and e.user_data[_ENTRY_KEY]
-                out[#out + 1] = string.format("%s %s", e.text or "*", ud and ud.rel or e.filename)
+                local label   = e.filename
+                if ud then
+                    if ud.left_rel and ud.right_rel and ud.left_rel ~= ud.right_rel then
+                        label = string.format("%s -> %s", ud.left_rel, ud.right_rel)
+                    else
+                        label = ud.right_rel or ud.left_rel
+                    end
+                end
+                out[#out + 1] = string.format("%s %s", e.text or "*", label)
             end
             return out
         end,
