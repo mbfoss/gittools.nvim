@@ -196,18 +196,23 @@ local function _build_layout(session)
     vim.cmd("rightbelow vsplit")
     session.right_win = vim.api.nvim_get_current_win()
 
+    -- Defer teardown: closing further windows synchronously from WinClosed
+    -- breaks commands like :tabclose that are still mid-close (E445).
+    local function close_later()
+        vim.schedule(function() _close_session(session) end)
+    end
     for _, win in ipairs({ session.left_win, session.right_win }) do
         vim.api.nvim_create_autocmd("WinClosed", {
             group    = session.group,
             pattern  = tostring(win),
-            callback = function() _close_session(session) end,
+            callback = close_later,
         })
     end
     vim.api.nvim_create_autocmd("TabClosed", {
         group    = session.group,
         callback = function()
             if not (session.tab and vim.api.nvim_tabpage_is_valid(session.tab)) then
-                _close_session(session)
+                close_later()
             end
         end,
     })

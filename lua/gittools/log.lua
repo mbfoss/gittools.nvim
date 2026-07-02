@@ -2,7 +2,7 @@ local M        = {}
 
 local git      = require("gittools.git")
 local difftool = require("gittools.diff")
-local uitool   = require("gittools.util.uitool")
+local ui   = require("gittools.util.ui")
 
 --- `:GitTool log [<rev>] [-- <path>]` -- commit history as a flat list in a
 --- bottom split. `:GitTool graph [<rev>] [-- <path>]` -- the same, but with
@@ -188,7 +188,7 @@ end
 local function _show(session)
     _end_log()
 
-    local buf = uitool.create_scratch_buffer(false, {
+    local buf = ui.create_scratch_buffer(false, {
         filetype   = "gittoolslog",
         modifiable = false,
         undolevels = -1,
