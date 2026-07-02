@@ -30,6 +30,11 @@ local git = require("gittools.git")
 
 local _ENTRY_KEY = "gittools.diff"
 
+-- setloclist `title`, used both to populate the list and to recognize (in
+-- the QuickFixCmdPost guard below) whether the right window's location list
+-- is still ours or has been overwritten by an unrelated :lvimgrep/:laddexpr.
+local _LOCLIST_TITLE = "GitTool Diff Layout"
+
 ---@type GitTools.DiffSession[]
 local _sessions  = {}
 local _next_id   = 0
@@ -163,7 +168,7 @@ local function _close_session(session)
         end
     end
 
-    pcall(vim.api.nvim_del_augroup_by_id, session.group)
+    vim.api.nvim_del_augroup_by_id(session.group)
 
     -- The loclist window survives nvim_win_close of its owner; close it first.
     if session.right_win and vim.api.nvim_win_is_valid(session.right_win) then
@@ -348,6 +353,26 @@ local function _register_autocmds(session)
             local entry = _current_diff_entry(session)
             if not entry then return end
             vim.schedule(function() _setup_diff(session, entry) end)
+        end,
+    })
+
+    -- Commands like :lvimgrep, :lgrep, or :laddexpr silently replace the
+    -- right window's location list (and drop our quickfixtextfunc), leaving
+    -- the loclist buffer's `syntax match` status-letter highlighting behind
+    -- to mismatch against unrelated content. Detect the takeover via the
+    -- list title and tear the session down rather than let it show stale
+    -- highlights over a list it no longer owns.
+    vim.api.nvim_create_autocmd("QuickFixCmdPost", {
+        group    = session.group,
+        pattern  = "l*",
+        callback = function()
+            if not (session.right_win and vim.api.nvim_win_is_valid(session.right_win)) then
+                return
+            end
+            local info = vim.fn.getloclist(session.right_win, { title = 1 })
+            if info.title ~= _LOCLIST_TITLE then
+                vim.schedule(function() _close_session(session) end)
+            end
         end,
     })
 end
@@ -557,7 +582,7 @@ function M.diff(opts)
     _build_layout(session)
 
     vim.fn.setloclist(session.right_win, {}, " ", {
-        title            = "GitTool Diff Layout",
+        title            = _LOCLIST_TITLE,
         items            = entries,
         quickfixtextfunc = function(info)
             local items = vim.fn.getloclist(info.winid, { id = info.id, items = 1 }).items
