@@ -9,9 +9,9 @@ local ui   = require("gittools.util.ui")
 --- `git log --graph` rail drawing in front of each commit. `:GitTool
 --- stash_log` -- the stash list (`git stash list`) in the same kind of split,
 --- each entry labeled with its `stash@{N}` selector instead of a hash. In all
---- three views `<c>` flags a commit; `gd` on a second commit diffs the two
---- flagged commits (via `gittools.diff`); `gd` with nothing flagged diffs a
---- commit against its first parent.
+--- three views `<CR>` diffs the commit under the cursor against its first
+--- parent; `c` flags a commit, and if another commit was already flagged,
+--- immediately diffs the two (via `gittools.diff`).
 
 local _LIMIT      = 500
 local _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -189,18 +189,13 @@ local function _entry_at_cursor(session)
     return (entry and entry.hash) and entry or nil
 end
 
---- Diff `entry` against the flagged commit (if set and different) or against
---- its first parent (or the empty tree, for a root commit) otherwise. Leaves
---- the log split open -- `gittools.diff` opens the comparison in a fresh tab,
---- so the log stays put for further browsing.
+--- Diff `entry` against its first parent (or the empty tree, for a root
+--- commit) -- i.e. show what that commit itself changed. Leaves the log
+--- split open -- `gittools.diff` opens the comparison in a fresh tab, so the
+--- log stays put for further browsing.
 ---@param session GitTools.LogSession
 ---@param entry   GitTools.LogEntry
-local function _diff_from_cursor(session, entry)
-    local flagged = session.flagged
-    if flagged and flagged ~= entry.hash then
-        difftool.diff({ revs = { flagged, entry.hash }, root = session.root })
-        return
-    end
+local function _diff_against_parent(session, entry)
     local parent = entry.parents[1]
     if parent and git.verify_rev(session.root, parent) then
         difftool.diff({ revs = { parent, entry.hash }, root = session.root })
@@ -210,7 +205,7 @@ local function _diff_from_cursor(session, entry)
 end
 
 --- Show `session.entries` in a scratch buffer in a bottom split and wire up
---- the `gd` / `<c>` / `q` maps.
+--- the `gd` / `c` / `q` maps.
 ---@param session GitTools.LogSession
 local function _show(session)
     _end_log()
@@ -242,10 +237,10 @@ local function _show(session)
     vim.keymap.set("n", "<CR>", function()
         local entry = _entry_at_cursor(session)
         if not entry then return end
-        _diff_from_cursor(session, entry)
-    end, { buffer = buf, desc = "Diff flagged/parent commit" })
+        _diff_against_parent(session, entry)
+    end, { buffer = buf, desc = "Diff commit against its parent" })
 
-    vim.keymap.set("n", "<c>", function()
+    vim.keymap.set("n", "c", function()
         local entry = _entry_at_cursor(session)
         if not entry then return end
         local old = session.flagged
@@ -253,7 +248,12 @@ local function _show(session)
         session.flagged = old ~= entry.hash and entry.hash or nil
         if old then _render(session, session.line_of[old]) end
         if session.flagged then _render(session, session.line_of[session.flagged]) end
-    end, { buffer = buf, desc = "Toggle flag on commit for diffing" })
+        -- A different commit was already flagged: diff it against the one
+        -- just flagged.
+        if old and old ~= entry.hash then
+            difftool.diff({ revs = { old, entry.hash }, root = session.root })
+        end
+    end, { buffer = buf, desc = "Flag commit, diffing against the previous flag if any" })
 
     vim.keymap.set("n", "q", _end_log, { buffer = buf, desc = "Close log" })
 end
