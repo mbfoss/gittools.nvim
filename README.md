@@ -1,7 +1,7 @@
 # gittools.nvim
 
 A git front end built entirely on Neovim's **native** diff facilities — no
-external diff tool, no floating-window framework. One command, five
+external diff tool, no floating-window framework. One command, six
 subcommands:
 
 ```
@@ -9,6 +9,7 @@ subcommands:
 :GitTool diffthis [<rev>]
 :GitTool log [<rev>] [-- <path>]
 :GitTool graph [<rev>] [-- <path>]
+:GitTool stashlist
 :GitTool blame
 ```
 
@@ -58,6 +59,15 @@ branch and merge topology stays visible.
 
 Diffs open through `:GitTool diff` in their own tab, so the log stays put for
 further browsing.
+
+### `:GitTool stashlist`
+
+Browses `git stash list` in the same kind of interactive bottom split as
+`log`/`graph`, with the same keys (`<Tab>` flag, `gd` diff, `q` close). Each
+entry is labeled with its `stash@{N}` selector instead of a hash. Diffing a
+stash with nothing flagged compares it against its first parent — the commit
+that was checked out when it was stashed — showing the tracked changes it
+holds; untracked files stashed with `git stash push -u` aren't included.
 
 ### `:GitTool blame`
 

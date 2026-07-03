@@ -16,6 +16,8 @@ local blame    = require("gittools.blame")
 ---                                             interactive flat list
 ---   GitTool graph [<rev>] [-- <path>]         like log, but with `git log
 ---                                             --graph` rail drawing
+---   GitTool stashlist                         browse `git stash list` the
+---                                             same way as log
 ---   GitTool blame                             annotate the current buffer in
 ---                                             a scroll-bound blame sidebar
 --- This module owns only command registration and argument parsing; the work
@@ -66,6 +68,7 @@ local _USAGE = "Usage: GitTool diff [--staged] [<rev> [<rev>]]\n"
     .. "       GitTool diffthis [<rev>]\n"
     .. "       GitTool log [<rev>] [-- <path>]\n"
     .. "       GitTool graph [<rev>] [-- <path>]\n"
+    .. "       GitTool stashlist\n"
     .. "       GitTool blame"
 
 --- Register `:GitTool`. Auto-called by the central module loader.
@@ -100,6 +103,12 @@ function M.setup()
             end
             local fn = sub == "log" and logtool.log or logtool.graph
             fn({ rev = revs[1], path = paths[1] })
+        elseif sub == "stashlist" then
+            if args[2] then
+                _notify("GitTool stashlist takes no arguments", vim.log.levels.ERROR)
+                return
+            end
+            logtool.stash_log()
         elseif sub == "blame" then
             if args[2] then
                 _notify("GitTool blame takes no arguments", vim.log.levels.ERROR)
@@ -112,7 +121,7 @@ function M.setup()
     end, {
         desc          = "Git diff via Neovim's native diff tools",
         subcommand_fn = function(_, rest, arg_lead)
-            if #rest == 0 then return { "diff", "diffthis", "log", "graph", "blame" } end
+            if #rest == 0 then return { "diff", "diffthis", "log", "graph", "stashlist", "blame" } end
 
             local sub = rest[1]
             if sub == "diff" then
