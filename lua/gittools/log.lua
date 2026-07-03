@@ -7,9 +7,9 @@ local ui   = require("gittools.util.ui")
 --- `:GitTool log [<rev>] [-- <path>]` -- commit history as a flat list in a
 --- bottom split. `:GitTool graph [<rev>] [-- <path>]` -- the same, but with
 --- `git log --graph` rail drawing in front of each commit. `:GitTool
---- stashlist` -- the stash list (`git stash list`) in the same kind of split,
+--- stash_log` -- the stash list (`git stash list`) in the same kind of split,
 --- each entry labeled with its `stash@{N}` selector instead of a hash. In all
---- three views `<Tab>` flags a commit; `gd` on a second commit diffs the two
+--- three views `<c>` flags a commit; `gd` on a second commit diffs the two
 --- flagged commits (via `gittools.diff`); `gd` with nothing flagged diffs a
 --- commit against its first parent.
 
@@ -210,7 +210,7 @@ local function _diff_from_cursor(session, entry)
 end
 
 --- Show `session.entries` in a scratch buffer in a bottom split and wire up
---- the `gd` / `<Tab>` / `q` maps.
+--- the `gd` / `<c>` / `q` maps.
 ---@param session GitTools.LogSession
 local function _show(session)
     _end_log()
@@ -245,7 +245,7 @@ local function _show(session)
         _diff_from_cursor(session, entry)
     end, { buffer = buf, desc = "Diff flagged/parent commit" })
 
-    vim.keymap.set("n", "<Tab>", function()
+    vim.keymap.set("n", "<c>", function()
         local entry = _entry_at_cursor(session)
         if not entry then return end
         local old = session.flagged
