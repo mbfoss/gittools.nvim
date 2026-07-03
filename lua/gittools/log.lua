@@ -9,7 +9,8 @@ local ui   = require("gittools.util.ui")
 --- `git log --graph` rail drawing in front of each commit. In both views
 --- `<Tab>` flags a commit; `gd` on a second commit diffs the two flagged
 --- commits (via `gittools.diff`); `gd` with nothing flagged diffs a commit
---- against its first parent.
+--- against its first parent. `<C-t>` cycles the per-line display style
+--- (short / author / relative-date).
 
 local _LIMIT      = 500
 local _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -26,7 +27,9 @@ end
 ---@field rails   string    graph rail prefix; "" in the plain log view
 ---@field hash    string?
 ---@field parents string[]?
----@field date    string?
+---@field date    string?   author date, short (YYYY-MM-DD)
+---@field rdate   string?   author date, relative ("3 days ago")
+---@field author  string?   author name
 ---@field subject string?
 
 ---@class GitTools.LogSession
@@ -34,6 +37,7 @@ end
 ---@field buf     integer?
 ---@field win     integer?
 ---@field flagged string?
+---@field style   integer                       index into _STYLES (cycled by <C-t>)
 ---@field entries GitTools.LogEntry[]           by buffer line
 ---@field line_of table<string, integer>        hash -> buffer line
 ---@type GitTools.LogSession?
@@ -57,37 +61,38 @@ local function _split_parents(parents)
     return out
 end
 
---- Parse `git log --pretty=format:%H\t%P\t%ad\t%s` output.
+--- Parse `git log --pretty=format:%H\t%P\t%ad\t%ar\t%an\t%s` output.
 ---@param out string
 ---@return GitTools.LogEntry[]
 local function _parse_log(out)
     local entries = {}
     for _, line in ipairs(git.lines(out)) do
-        local hash, parents, date, subject = line:match("^(%x+)\t([^\t]*)\t([^\t]*)\t(.*)$")
+        local hash, parents, date, rdate, author, subject =
+            line:match("^(%x+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
         if hash then
             entries[#entries + 1] = {
                 rails = "", hash = hash, parents = _split_parents(parents),
-                date = date, subject = subject,
+                date = date, rdate = rdate, author = author, subject = subject,
             }
         end
     end
     return entries
 end
 
---- Parse `git log --graph --pretty=format:%x09%H%x09%P%x09%ad%x09%s` output.
---- The leading tab in the format separates git's rail drawing from the commit
---- fields; lines without it are pure rail art between commits.
+--- Parse `git log --graph --pretty=format:%x09%H%x09%P%x09%ad%x09%ar%x09%an%x09%s`
+--- output. The leading tab in the format separates git's rail drawing from the
+--- commit fields; lines without it are pure rail art between commits.
 ---@param out string
 ---@return GitTools.LogEntry[]
 local function _parse_graph(out)
     local entries = {}
     for _, line in ipairs(git.lines(out)) do
-        local rails, hash, parents, date, subject =
-            line:match("^([^\t]*)\t(%x+)\t([^\t]*)\t([^\t]*)\t(.*)$")
+        local rails, hash, parents, date, rdate, author, subject =
+            line:match("^([^\t]*)\t(%x+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
         if hash then
             entries[#entries + 1] = {
                 rails = rails, hash = hash, parents = _split_parents(parents),
-                date = date, subject = subject,
+                date = date, rdate = rdate, author = author, subject = subject,
             }
         else
             entries[#entries + 1] = { rails = line }
@@ -95,6 +100,46 @@ local function _parse_graph(out)
     end
     return entries
 end
+
+-- Per-line display styles cycled through with <C-t> (see the <C-t> map). Each
+-- `build` returns the `{text, hl}` chunks for a commit's fields; the rail
+-- prefix and the flag marker are prepended by `_entry_chunks` regardless of
+-- style. Ordered roughly least-to-most detail so cycling feels progressive.
+---@type { name: string, build: fun(e: GitTools.LogEntry): [string, string][] }[]
+local _STYLES = {
+    {
+        name = "short",
+        build = function(e)
+            return {
+                { e.hash:sub(1, 7), "Comment" },
+                { " " .. e.date .. " ", "DiagnosticHint" },
+                { e.subject, "Normal" },
+            }
+        end,
+    },
+    {
+        name = "author",
+        build = function(e)
+            return {
+                { e.hash:sub(1, 7), "Comment" },
+                { " " .. e.date .. " ", "DiagnosticHint" },
+                { e.author .. " ", "Identifier" },
+                { e.subject, "Normal" },
+            }
+        end,
+    },
+    {
+        name = "relative",
+        build = function(e)
+            return {
+                { e.hash:sub(1, 7), "Comment" },
+                { " " .. e.rdate .. " ", "DiagnosticHint" },
+                { e.author .. " ", "Identifier" },
+                { e.subject, "Normal" },
+            }
+        end,
+    },
+}
 
 --- The `{text, hl}` chunks making up one buffer line.
 ---@param session GitTools.LogSession
@@ -109,9 +154,9 @@ local function _entry_chunks(session, entry)
         if session.flagged == entry.hash then
             chunks[#chunks + 1] = { "» ", "WarningMsg" }
         end
-        chunks[#chunks + 1] = { entry.hash:sub(1, 7), "Comment" }
-        chunks[#chunks + 1] = { " " .. entry.date .. " ", "DiagnosticHint" }
-        chunks[#chunks + 1] = { entry.subject, "Normal" }
+        for _, chunk in ipairs(_STYLES[session.style].build(entry)) do
+            chunks[#chunks + 1] = chunk
+        end
     end
     return chunks
 end
@@ -228,6 +273,12 @@ local function _show(session)
         if session.flagged then _render(session, session.line_of[session.flagged]) end
     end, { buffer = buf, desc = "Toggle flag on commit for diffing" })
 
+    vim.keymap.set("n", "<C-t>", function()
+        session.style = session.style % #_STYLES + 1
+        _render(session)
+        _notify("Log style: " .. _STYLES[session.style].name)
+    end, { buffer = buf, desc = "Cycle log display style" })
+
     vim.keymap.set("n", "q", _end_log, { buffer = buf, desc = "Close log" })
 end
 
@@ -281,7 +332,7 @@ local function _run_log(opts, extra_args, parse)
         if entry.hash then line_of[entry.hash] = i end
     end
 
-    _show({ root = root, flagged = nil, entries = entries, line_of = line_of })
+    _show({ root = root, flagged = nil, style = 1, entries = entries, line_of = line_of })
 end
 
 --- List commit history in an interactive bottom split, starting from
@@ -289,14 +340,14 @@ end
 --- `git log [<rev>] [-- <path>]`.
 ---@param opts GitTools.LogOpts?
 function M.log(opts)
-    _run_log(opts or {}, { "--pretty=format:%H\t%P\t%ad\t%s" }, _parse_log)
+    _run_log(opts or {}, { "--pretty=format:%H\t%P\t%ad\t%ar\t%an\t%s" }, _parse_log)
 end
 
 --- Like `M.log`, but with `git log --graph` rail drawing in front of each
 --- commit -- mirrors `git log --graph [<rev>] [-- <path>]`.
 ---@param opts GitTools.LogOpts?
 function M.graph(opts)
-    _run_log(opts or {}, { "--graph", "--pretty=format:%x09%H%x09%P%x09%ad%x09%s" }, _parse_graph)
+    _run_log(opts or {}, { "--graph", "--pretty=format:%x09%H%x09%P%x09%ad%x09%ar%x09%an%x09%s" }, _parse_graph)
 end
 
 return M

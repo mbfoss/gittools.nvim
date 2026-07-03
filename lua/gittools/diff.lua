@@ -24,6 +24,8 @@ local git = require("gittools.git")
 ---@field tab        integer?  tabpage handle the diff lives in
 ---@field left_win   integer?  window for the left (base/source) side
 ---@field right_win  integer?  window for the right (target/live) side; owns the loclist
+---@field loclist_win integer? the location-list window (records it so we can
+---                            still close it once right_win is gone)
 ---@field buffers    integer[] generated virtual buffers to delete on close
 ---@field closing    boolean   reentrancy guard for close()
 ---@field setting_up boolean   reentrancy guard to stop infinite event loops
@@ -171,12 +173,20 @@ local function _close_session(session)
     vim.api.nvim_del_augroup_by_id(session.group)
 
     -- The loclist window survives nvim_win_close of its owner; close it first.
-    if session.right_win and vim.api.nvim_win_is_valid(session.right_win) then
-        local llwin = vim.fn.getloclist(session.right_win, { winid = 0 }).winid
-        if llwin ~= 0 and vim.api.nvim_win_is_valid(llwin) then
-            pcall(vim.api.nvim_win_close, llwin, false)
-        end
+    -- Prefer the window recorded at open time: once right_win (the list's
+    -- owner) has itself been closed, getloclist can no longer locate the list,
+    -- so a lookup keyed on right_win would miss it and leave the loclist window
+    -- behind, blocking the tab from closing.
+    local llwin = session.loclist_win
+    if not (llwin and vim.api.nvim_win_is_valid(llwin))
+        and session.right_win and vim.api.nvim_win_is_valid(session.right_win) then
+        local found = vim.fn.getloclist(session.right_win, { winid = 0 }).winid
+        llwin = found ~= 0 and found or nil
     end
+    if llwin and vim.api.nvim_win_is_valid(llwin) then
+        pcall(vim.api.nvim_win_close, llwin, false)
+    end
+    session.loclist_win = nil
 
     for _, win_key in ipairs({ "left_win", "right_win" }) do
         local win = session[win_key] --[[@as integer?]]
@@ -569,9 +579,10 @@ function M.diff(opts)
     ---@type GitTools.DiffSession
     local session = {
         group      = vim.api.nvim_create_augroup("gittools.diff." .. _next_id, { clear = true }),
-        tab        = nil,
-        left_win   = nil,
-        right_win  = nil,
+        tab         = nil,
+        left_win    = nil,
+        right_win   = nil,
+        loclist_win = nil,
         buffers    = {},
         closing    = false,
         setting_up = false,
@@ -608,6 +619,7 @@ function M.diff(opts)
     vim.api.nvim_win_call(session.right_win, function() vim.cmd("botright lopen") end)
     local llwin = vim.fn.getloclist(session.right_win, { winid = 0 }).winid
     if llwin ~= 0 then
+        session.loclist_win = llwin
         _highlight_loclist(vim.api.nvim_win_get_buf(llwin))
     end
     vim.api.nvim_set_current_win(session.right_win)
