@@ -64,13 +64,6 @@ local function _split_sep(args)
     return args, {}
 end
 
-local _USAGE = "Usage: GitTool diff [--staged] [<rev> [<rev>]]\n"
-    .. "       GitTool diffthis [<rev>]\n"
-    .. "       GitTool log [<rev>] [-- <path>]\n"
-    .. "       GitTool graph [<rev>] [-- <path>]\n"
-    .. "       GitTool stashlist\n"
-    .. "       GitTool blame"
-
 --- Register `:GitTool`. Auto-called by the central module loader.
 function M.setup()
     local group = vim.api.nvim_create_augroup(_AUGROUP, { clear = true })
@@ -116,7 +109,7 @@ function M.setup()
             end
             blame.blame()
         else
-            _notify(_USAGE, vim.log.levels.WARN)
+            vim.api.nvim_echo({{"Argument required", "Error"}}, false, {})
         end
     end, {
         desc          = "Git diff via Neovim's native diff tools",
