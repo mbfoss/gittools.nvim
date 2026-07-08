@@ -17,11 +17,12 @@ local git = require("gittools.git")
 ---@field left  GitTools.Side   how to fetch left content
 ---@field right GitTools.Side   how to fetch right content
 
---- One diff tab. Several can be open at once; each owns its tab, windows,
---- generated buffers, and the location list attached to its right window.
+--- One diff session, living in a vertical split of the window it was launched
+--- from. It owns its two split windows, the generated buffers, and the
+--- location list attached to its right window. On teardown it collapses back
+--- to a single window so the original layout is restored.
 ---@class GitTools.DiffSession
 ---@field group      integer   augroup id for this session's autocmds
----@field tab        integer?  tabpage handle the diff lives in
 ---@field left_win   integer?  window for the left (base/source) side
 ---@field right_win  integer?  window for the right (target/live) side; owns the loclist
 ---@field loclist_win integer? the location-list window (records it so we can
@@ -155,9 +156,10 @@ local function _notify(msg, level)
     vim.notify("[gittools] " .. msg, level or vim.log.levels.INFO)
 end
 
---- Tear down `session`: drop its autocmds, close its windows (the location
---- list window follows its owning window), and delete its generated buffers.
---- Safe to invoke at any point.
+--- Tear down `session`: drop its autocmds, close the location list, collapse
+--- the side-by-side split back to a single surviving window (so the original
+--- layout is restored), and delete its generated buffers. Safe to invoke at
+--- any point, whichever of the split windows or the loclist the user closed.
 ---@param session GitTools.DiffSession
 local function _close_session(session)
     if session.closing then return end
@@ -170,13 +172,15 @@ local function _close_session(session)
         end
     end
 
+    -- Drop the autocmds before closing anything, so the window closes below
+    -- don't re-trigger teardown through our own WinClosed hooks.
     vim.api.nvim_del_augroup_by_id(session.group)
 
     -- The loclist window survives nvim_win_close of its owner; close it first.
     -- Prefer the window recorded at open time: once right_win (the list's
     -- owner) has itself been closed, getloclist can no longer locate the list,
     -- so a lookup keyed on right_win would miss it and leave the loclist window
-    -- behind, blocking the tab from closing.
+    -- behind.
     local llwin = session.loclist_win
     if not (llwin and vim.api.nvim_win_is_valid(llwin))
         and session.right_win and vim.api.nvim_win_is_valid(session.right_win) then
@@ -188,21 +192,34 @@ local function _close_session(session)
     end
     session.loclist_win = nil
 
-    for _, win_key in ipairs({ "left_win", "right_win" }) do
-        local win = session[win_key] --[[@as integer?]]
-        if win and vim.api.nvim_win_is_valid(win) then
+    -- Keep exactly one of the two split windows so the layout collapses back
+    -- to a single window. Prefer the right (target/worktree) side; fall back
+    -- to the left when the user closed the right one.
+    local left_valid  = session.left_win and vim.api.nvim_win_is_valid(session.left_win)
+    local right_valid = session.right_win and vim.api.nvim_win_is_valid(session.right_win)
+    local survivor    = (right_valid and session.right_win) or (left_valid and session.left_win) or nil
+
+    for _, win in ipairs({ session.left_win, session.right_win }) do
+        if win and win ~= survivor and vim.api.nvim_win_is_valid(win) then
             pcall(vim.api.nvim_win_close, win, false)
         end
-        session[win_key] = nil
     end
+    if survivor and vim.api.nvim_win_is_valid(survivor) then
+        vim.api.nvim_win_call(survivor, function() vim.cmd("diffoff") end)
+    end
+    session.left_win  = nil
+    session.right_win = nil
 
+    -- Delete the generated buffers, but spare whichever one is still shown in
+    -- the surviving window so it doesn't blank out under the user.
+    local keep = survivor and vim.api.nvim_win_is_valid(survivor)
+        and vim.api.nvim_win_get_buf(survivor) or nil
     for _, bufnr in ipairs(session.buffers) do
-        if vim.api.nvim_buf_is_valid(bufnr) then
+        if bufnr ~= keep and vim.api.nvim_buf_is_valid(bufnr) then
             pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
         end
     end
     session.buffers = {}
-    session.tab     = nil
 end
 
 --- Close every open diff session (e.g. on VimLeavePre).
@@ -251,7 +268,7 @@ local function _make_git_buf(session, root, side, rel, side_label, filetype)
     vim.bo[buf].swapfile   = false
     vim.bo[buf].filetype   = filetype
     vim.bo[buf].modifiable = false
-    -- set_lines marked the scratch buffer modified; clear it so window/tab
+    -- set_lines marked the scratch buffer modified; clear it so window
     -- closes aren't blocked by E445 when 'hidden' is off.
     vim.bo[buf].modified   = false
 
@@ -316,35 +333,25 @@ local function _setup_diff(session, entry)
     session.setting_up = false
 end
 
---- Build a standalone tab page layout without nvim.difftool orchestration
+--- Split the current window into the side-by-side diff layout, reusing the
+--- launching window as the left side and a vertical split as the right side.
+--- Closing either split window (or, once registered, the location list) tears
+--- the session down and collapses back to a single window.
 ---@param session GitTools.DiffSession
 local function _build_layout(session)
-    vim.cmd.tabnew()
-    session.tab      = vim.api.nvim_get_current_tabpage()
     session.left_win = vim.api.nvim_get_current_win()
     vim.cmd("rightbelow vsplit")
     session.right_win = vim.api.nvim_get_current_win()
 
     -- Defer teardown: closing further windows synchronously from WinClosed
-    -- breaks commands like :tabclose that are still mid-close (E445).
-    local function close_later()
-        vim.schedule(function() _close_session(session) end)
-    end
+    -- breaks Neovim's own mid-close bookkeeping (E445).
     for _, win in ipairs({ session.left_win, session.right_win }) do
         vim.api.nvim_create_autocmd("WinClosed", {
             group    = session.group,
             pattern  = tostring(win),
-            callback = close_later,
+            callback = function() vim.schedule(function() _close_session(session) end) end,
         })
     end
-    vim.api.nvim_create_autocmd("TabClosed", {
-        group    = session.group,
-        callback = function()
-            if not (session.tab and vim.api.nvim_tabpage_is_valid(session.tab)) then
-                close_later()
-            end
-        end,
-    })
 end
 
 --- Installs the tracking hook for running dynamic side updates upon navigation
@@ -521,9 +528,10 @@ end
 ---@field revs   string[]? zero, one, or two revisions (see git-diff semantics)
 ---@field root   string?   repo root to diff in (default: the root containing the editor's cwd)
 
---- Diff the requested revisions/index/working-tree sides in a dedicated tab,
---- driving a location list of changed paths and a side-by-side native diff.
---- Each call opens its own tab; existing diff tabs are left untouched.
+--- Diff the requested revisions/index/working-tree sides by splitting the
+--- current window, driving a location list of changed paths and a
+--- side-by-side native diff. Closing either split window or the location list
+--- collapses back to a single window, restoring the original layout.
 ---@param opts GitTools.DiffOpts?
 function M.diff(opts)
     opts = opts or {}
@@ -579,7 +587,6 @@ function M.diff(opts)
     ---@type GitTools.DiffSession
     local session = {
         group      = vim.api.nvim_create_augroup("gittools.diff." .. _next_id, { clear = true }),
-        tab         = nil,
         left_win    = nil,
         right_win   = nil,
         loclist_win = nil,
@@ -621,6 +628,13 @@ function M.diff(opts)
     if llwin ~= 0 then
         session.loclist_win = llwin
         _highlight_loclist(vim.api.nvim_win_get_buf(llwin))
+        -- Closing the location list on its own also collapses the session, so
+        -- the user only ever needs one close to get back to a single window.
+        vim.api.nvim_create_autocmd("WinClosed", {
+            group    = session.group,
+            pattern  = tostring(llwin),
+            callback = function() vim.schedule(function() _close_session(session) end) end,
+        })
     end
     vim.api.nvim_set_current_win(session.right_win)
     vim.cmd.lfirst()
