@@ -38,8 +38,10 @@ local _ENTRY_KEY = "gittools.diff"
 -- is still ours or has been overwritten by an unrelated :lvimgrep/:laddexpr.
 local _LOCLIST_TITLE = "GitTool Diff Layout"
 
----@type GitTools.DiffSession[]
-local _sessions  = {}
+-- Only a single diff session exists at a time; opening a new diff tears down
+-- the previous one (see M.diff). nil when idle.
+---@type GitTools.DiffSession?
+local _session   = nil
 local _next_id   = 0
 
 -- Status letters (mirroring `git status --short`) rendered at the start of
@@ -165,12 +167,7 @@ local function _close_session(session)
     if session.closing then return end
     session.closing = true
 
-    for i, s in ipairs(_sessions) do
-        if s == session then
-            table.remove(_sessions, i)
-            break
-        end
-    end
+    if _session == session then _session = nil end
 
     -- Drop the autocmds before closing anything, so the window closes below
     -- don't re-trigger teardown through our own WinClosed hooks.
@@ -222,12 +219,9 @@ local function _close_session(session)
     session.buffers = {}
 end
 
---- Close every open diff session (e.g. on VimLeavePre).
+--- Close the active diff session, if any (e.g. on VimLeavePre).
 function M.clear_session()
-    -- _close_session removes the session from _sessions; iterate off a copy.
-    for _, session in ipairs({ unpack(_sessions) }) do
-        _close_session(session)
-    end
+    if _session then _close_session(_session) end
 end
 
 --- Create a read-only scratch buffer filled with historical blob contents or empty for deletions
@@ -594,7 +588,11 @@ function M.diff(opts)
         closing    = false,
         setting_up = false,
     }
-    _sessions[#_sessions + 1] = session
+    -- Only a single diff at a time: tear down any existing session before
+    -- building the new one. Done here, after every early return above, so a
+    -- diff that turns out to be invalid or empty leaves the current one intact.
+    if _session then _close_session(_session) end
+    _session = session
 
     _register_autocmds(session)
     _build_layout(session)
