@@ -9,7 +9,7 @@ local blame    = require("gittools.blame")
 
 --- `:GitTool` -- a git-backed front end for Neovim's native diff facilities.
 ---   GitTool diff [--staged] [<rev> [<rev>]]   directory diff via the built-in
----                                             difftool (quickfix + layout)
+---                                             difftool (file list + layout)
 ---   GitTool diffthis [<rev>]                  diff the current buffer (incl.
 ---                                             unsaved edits) in a side split
 ---   GitTool log [<rev>] [-- <path>]           browse commit history as an

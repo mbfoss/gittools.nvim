@@ -1,6 +1,7 @@
 local M   = {}
 
 local git = require("gittools.git")
+local ui  = require("gittools.util.ui")
 
 --- One side of a comparison. Exactly one field is set.
 ---@class GitTools.Side
@@ -17,28 +18,30 @@ local git = require("gittools.git")
 ---@field left  GitTools.Side   how to fetch left content
 ---@field right GitTools.Side   how to fetch right content
 
+--- One row of the file list: a status letter, the (rename-aware) label shown
+--- for it, and the data needed to build its side-by-side diff.
+---@class GitTools.DiffEntry
+---@field status "A"|"M"|"D"|"R"|"C"|"?"  single-letter status
+---@field label  string                   display label (rename-aware)
+---@field data   GitTools.EntryData        how to fetch each side's content
+
 --- One diff session, living in a vertical split of the window it was launched
---- from. It owns its two split windows, the generated buffers, and the
---- quickfix list driving navigation. On teardown it collapses back to a single
---- window so the original layout is restored.
+--- from. It owns its two split windows, the generated buffers, and a custom
+--- list buffer (in a bottom split) whose cursor drives which file is diffed.
+--- On teardown it collapses back to a single window so the original layout is
+--- restored.
 ---@class GitTools.DiffSession
 ---@field group      integer   augroup id for this session's autocmds
 ---@field left_win   integer?  window for the left (base/source) side
 ---@field right_win  integer?  window for the right (target/live) side
----@field qf_win     integer?  the quickfix window (records it so we can still
----                            close it once the split windows are gone)
+---@field list_buf   integer?  scratch buffer listing the changed files
+---@field list_win   integer?  bottom split window showing the list buffer
+---@field entries    GitTools.DiffEntry[]  one per list-buffer line (1-based)
 ---@field buffers    integer[] generated virtual buffers to delete on close
 ---@field closing    boolean   reentrancy guard for close()
 ---@field setting_up boolean   reentrancy guard to stop infinite event loops
----@field shown_idx  integer?  quickfix index whose diff is currently built, so
----                            a repeat setup for the same entry is a no-op
-
-local _ENTRY_KEY = "gittools.diff"
-
--- setqflist `title`, used both to populate the list and to recognize (in
--- the QuickFixCmdPost guard below) whether the quickfix list is still ours or
--- has been overwritten by an unrelated :vimgrep/:grep/:cexpr.
-local _QF_TITLE = "GitTool Diff Layout"
+---@field shown_line integer?  list line whose diff is currently built, so a
+---                            repeat setup for the same entry is a no-op
 
 -- Only a single diff session exists at a time; opening a new diff tears down
 -- the previous one (see M.diff). nil when idle.
@@ -47,7 +50,7 @@ local _session   = nil
 local _next_id   = 0
 
 -- Status letters (mirroring `git status --short`) rendered at the start of
--- each quickfix line, and the highlight group each links to by default.
+-- each list line, and the highlight group each links to by default.
 -- Linked to the builtin `Diagnostic*` groups rather than `Diff*`: those are
 -- mostly background fills meant for whole lines, so on a single character
 -- they read as an easy-to-miss colored speck (only `Title`, used for R/C in
@@ -133,13 +136,24 @@ local function _rename_label(old_rel, new_rel)
     return table.concat(parts)
 end
 
---- Color each quickfix line by its leading status letter (see `_STATUS_HL`).
+--- The display label for a change: the plain path for adds/deletes/edits, or
+--- the condensed `{old -> new}` form for a rename/copy.
+---@param change GitTools.Change
+---@return string
+local function _entry_label(change)
+    if change.left_rel and change.right_rel and change.left_rel ~= change.right_rel then
+        return _rename_label(change.left_rel, change.right_rel)
+    end
+    -- Every change sets at least one side (adds: right, deletes: left).
+    return (change.right_rel or change.left_rel) --[[@as string]]
+end
+
+--- Color each list line by its leading status letter (see `_STATUS_HL`).
 --- Rename/copy lines additionally get their arrow colored to match the status
 --- letter, and the superseded (old) path dimmed. Scoped to `bufnr` alone so it
---- can't bleed into unrelated quickfix/location-list windows elsewhere in the
---- session.
+--- can't bleed into unrelated buffers elsewhere in the session.
 ---@param bufnr integer
-local function _highlight_qflist(bufnr)
+local function _highlight_list(bufnr)
     vim.api.nvim_buf_call(bufnr, function()
         for status, pair in pairs(_STATUS_HL) do
             local pattern = status == "?" and [[^?]] or ("^" .. status .. [[\>]])
@@ -160,10 +174,10 @@ local function _notify(msg, level)
     vim.notify("[gittools] " .. msg, level or vim.log.levels.INFO)
 end
 
---- Tear down `session`: drop its autocmds, close the quickfix list, collapse
---- the side-by-side split back to a single surviving window (so the original
+--- Tear down `session`: drop its autocmds, close the file list, collapse the
+--- side-by-side split back to a single surviving window (so the original
 --- layout is restored), and delete its generated buffers. Safe to invoke at
---- any point, whichever of the split windows or the quickfix list the user closed.
+--- any point, whichever of the split windows or the list the user closed.
 ---@param session GitTools.DiffSession
 local function _close_session(session)
     if session.closing then return end
@@ -175,18 +189,13 @@ local function _close_session(session)
     -- don't re-trigger teardown through our own WinClosed hooks.
     vim.api.nvim_del_augroup_by_id(session.group)
 
-    -- The quickfix window survives nvim_win_close of the split windows; close
-    -- it first. Prefer the window recorded at open time, falling back to a live
-    -- lookup in case it was opened again after ours was closed.
-    local qfwin = session.qf_win
-    if not (qfwin and vim.api.nvim_win_is_valid(qfwin)) then
-        local found = vim.fn.getqflist({ winid = 0 }).winid
-        qfwin = found ~= 0 and found or nil
+    -- Close the file-list window first (it's a separate bottom split); its
+    -- scratch buffer is bufhidden=wipe, so this also drops the buffer.
+    if session.list_win and vim.api.nvim_win_is_valid(session.list_win) then
+        pcall(vim.api.nvim_win_close, session.list_win, false)
     end
-    if qfwin and vim.api.nvim_win_is_valid(qfwin) then
-        pcall(vim.api.nvim_win_close, qfwin, false)
-    end
-    session.qf_win = nil
+    session.list_win = nil
+    session.list_buf = nil
 
     -- Keep exactly one of the two split windows so the layout collapses back
     -- to a single window. Prefer the right (target/worktree) side; fall back
@@ -278,23 +287,23 @@ local function _make_git_buf(session, root, side, rel, side_label, filetype)
     return buf
 end
 
---- Extract the current quickfix item if it belongs to us
----@return table? entry
-local function _current_diff_entry()
-    local info = vim.fn.getqflist({ idx = 0, items = 1, size = 1 })
-    if info.size == 0 then return nil end
-
-    local entry = info.items[info.idx]
-    if not (entry and entry.user_data and entry.user_data[_ENTRY_KEY]) then
-        return nil
-    end
-    return entry
+--- The entry (and its 1-based list line) under the cursor in the list window.
+---@param session GitTools.DiffSession
+---@return GitTools.DiffEntry? entry
+---@return integer? line
+local function _entry_at_cursor(session)
+    local win = session.list_win
+    if not (win and vim.api.nvim_win_is_valid(win)) then return nil, nil end
+    local lnum = vim.api.nvim_win_get_cursor(win)[1]
+    return session.entries[lnum], lnum
 end
 
 --- Drive side-by-side native splits using fresh contextual buffer snapshots
+--- for the file on list line `lnum`.
 ---@param session GitTools.DiffSession
----@param entry table
-local function _setup_diff(session, entry)
+---@param entry   GitTools.DiffEntry
+---@param lnum    integer  the entry's list line, used as the rebuild guard
+local function _setup_diff(session, entry, lnum)
     if session.setting_up then return end
     session.setting_up = true
 
@@ -304,19 +313,16 @@ local function _setup_diff(session, entry)
         return
     end
 
-    -- Skip if the currently selected entry's diff is already built. Lets the
-    -- initial setup be driven explicitly (see M.diff) while any redundant
-    -- BufWinEnter for the same entry -- e.g. the one `:cfirst` fires -- is a
-    -- harmless no-op rather than a second, buffer-leaking rebuild.
-    local idx = vim.fn.getqflist({ idx = 0 }).idx
-    if session.shown_idx == idx then
+    -- Skip if this line's diff is already built, so repeatedly landing on the
+    -- same entry (e.g. horizontal cursor moves) is a harmless no-op rather
+    -- than a second, buffer-leaking rebuild.
+    if session.shown_line == lnum then
         session.setting_up = false
         return
     end
-    session.shown_idx = idx
+    session.shown_line = lnum
 
-    ---@type GitTools.EntryData
-    local ud = entry.user_data[_ENTRY_KEY]
+    local ud = entry.data
     local filetype = vim.filetype.match({ filename = ud.right_rel or ud.left_rel }) or ""
 
     local right_buf
@@ -341,8 +347,8 @@ end
 
 --- Split the current window into the side-by-side diff layout, reusing the
 --- launching window as the left side and a vertical split as the right side.
---- Closing either split window (or, once registered, the quickfix list) tears
---- the session down and collapses back to a single window.
+--- Closing either split window (or, once registered, the file list) tears the
+--- session down and collapses back to a single window.
 ---@param session GitTools.DiffSession
 local function _build_layout(session)
     session.left_win = vim.api.nvim_get_current_win()
@@ -360,42 +366,84 @@ local function _build_layout(session)
     end
 end
 
---- Installs the tracking hook for running dynamic side updates upon navigation
+--- Render `session.entries` into a fresh scratch buffer.
 ---@param session GitTools.DiffSession
-local function _register_autocmds(session)
-    vim.api.nvim_create_autocmd("BufWinEnter", {
+---@return integer bufnr
+local function _make_list_buf(session)
+    local buf = ui.create_scratch_buffer(false, {
+        filetype   = "gittoolsdiff",
+        modifiable = false,
+        undolevels = -1,
+    }, function()
+        -- The list buffer wiping (e.g. the user :bdelete'd it) collapses the
+        -- whole session, so it can't outlive the diff it drives.
+        vim.schedule(function() _close_session(session) end)
+    end)
+
+    local lines = {}
+    for _, entry in ipairs(session.entries) do
+        lines[#lines + 1] = string.format("%s %s", entry.status, entry.label)
+    end
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+
+    _highlight_list(buf)
+    return buf
+end
+
+--- Open the file list in a bottom split, wire its cursor-driven diff preview
+--- and the `<CR>` / `q` maps.
+---@param session GitTools.DiffSession
+local function _open_list(session)
+    local buf = _make_list_buf(session)
+    session.list_buf = buf
+
+    vim.cmd("botright new")
+    local win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(win, buf)
+    vim.api.nvim_win_set_height(win, math.min(15, #session.entries))
+    -- A new split inherits window-local options (scrollbind, cursorbind, ...)
+    -- from the window it split off of; reset them so the list can't end up
+    -- scroll-linked to a diff pane, and dress it as a picker.
+    vim.wo[win].scrollbind     = false
+    vim.wo[win].cursorbind     = false
+    vim.wo[win].wrap           = false
+    vim.wo[win].number         = false
+    vim.wo[win].relativenumber = false
+    vim.wo[win].cursorline     = true
+    session.list_win = win
+
+    -- Moving the cursor onto a different file rebuilds the side-by-side diff
+    -- for it (a live preview), staying in the list so the user keeps browsing.
+    vim.api.nvim_create_autocmd("CursorMoved", {
         group    = session.group,
-        pattern  = "*",
+        buffer   = buf,
         callback = function()
-            -- Ignore BufWinEnter events fired synchronously by our own
-            -- nvim_win_set_buf calls in _setup_diff; otherwise they re-trigger
-            -- setup endlessly.
-            if session.setting_up then return end
-            local win = vim.api.nvim_get_current_win()
-            if win ~= session.left_win and win ~= session.right_win then return end
-            local entry = _current_diff_entry()
-            if not entry then return end
-            vim.schedule(function() _setup_diff(session, entry) end)
+            local entry, lnum = _entry_at_cursor(session)
+            if entry and lnum then _setup_diff(session, entry, lnum) end
         end,
     })
 
-    -- Commands like :vimgrep, :grep, or :cexpr silently replace the quickfix
-    -- list (and drop our quickfixtextfunc), leaving the quickfix buffer's
-    -- `syntax match` status-letter highlighting behind to mismatch against
-    -- unrelated content. Detect the takeover via the list title and tear the
-    -- session down rather than let it show stale highlights over a list it no
-    -- longer owns. Fires for location-list commands too, but those don't touch
-    -- the quickfix list, so the title check leaves the session intact.
-    vim.api.nvim_create_autocmd("QuickFixCmdPost", {
+    -- Closing the list on its own also collapses the session, so the user only
+    -- ever needs one close to get back to a single window.
+    vim.api.nvim_create_autocmd("WinClosed", {
         group    = session.group,
-        pattern  = "*",
-        callback = function()
-            local info = vim.fn.getqflist({ title = 1 })
-            if info.title ~= _QF_TITLE then
-                vim.schedule(function() _close_session(session) end)
-            end
-        end,
+        pattern  = tostring(win),
+        callback = function() vim.schedule(function() _close_session(session) end) end,
     })
+
+    vim.keymap.set("n", "<CR>", function()
+        local entry, lnum = _entry_at_cursor(session)
+        if not (entry and lnum) then return end
+        _setup_diff(session, entry, lnum)
+        if session.right_win and vim.api.nvim_win_is_valid(session.right_win) then
+            vim.api.nvim_set_current_win(session.right_win)
+        end
+    end, { buffer = buf, desc = "Focus the diff for the file under the cursor" })
+
+    vim.keymap.set("n", "q", function() _close_session(session) end,
+        { buffer = buf, desc = "Close the diff" })
 end
 
 --- Resolve parsed CLI options into the left/right sides of the comparison.
@@ -533,9 +581,11 @@ end
 ---@field root   string?   repo root to diff in (default: the root containing the editor's cwd)
 
 --- Diff the requested revisions/index/working-tree sides by splitting the
---- current window, driving a quickfix list of changed paths and a
---- side-by-side native diff. Closing either split window or the quickfix list
---- collapses back to a single window, restoring the original layout.
+--- current window, driving a custom file list (in a bottom split) whose cursor
+--- selects the file shown in a side-by-side native diff. Moving the cursor in
+--- the list live-previews that file; `<CR>` focuses the diff and `q` closes it.
+--- Closing either split window or the file list collapses back to a single
+--- window, restoring the original layout.
 ---@param opts GitTools.DiffOpts?
 function M.diff(opts)
     opts = opts or {}
@@ -569,21 +619,19 @@ function M.diff(opts)
         return
     end
 
+    ---@type GitTools.DiffEntry[]
     local entries = {}
     for _, change in ipairs(changes) do
-        local display = change.right_rel or change.left_rel
         entries[#entries + 1] = {
-            filename  = root .. "/" .. display,
-            text      = change.status,
-            user_data = {
-                [_ENTRY_KEY] = {
-                    root      = root,
-                    left_rel  = change.left_rel,
-                    right_rel = change.right_rel,
-                    left      = left,
-                    right     = right,
-                }
-            }
+            status = change.status,
+            label  = _entry_label(change),
+            data   = {
+                root      = root,
+                left_rel  = change.left_rel,
+                right_rel = change.right_rel,
+                left      = left,
+                right     = right,
+            },
         }
     end
 
@@ -591,13 +639,15 @@ function M.diff(opts)
     ---@type GitTools.DiffSession
     local session = {
         group      = vim.api.nvim_create_augroup("gittools.diff." .. _next_id, { clear = true }),
-        left_win    = nil,
-        right_win   = nil,
-        qf_win      = nil,
+        left_win   = nil,
+        right_win  = nil,
+        list_buf   = nil,
+        list_win   = nil,
+        entries    = entries,
         buffers    = {},
         closing    = false,
         setting_up = false,
-        shown_idx  = nil,
+        shown_line = nil,
     }
     -- Only a single diff at a time: tear down any existing session before
     -- building the new one. Done here, after every early return above, so a
@@ -605,56 +655,16 @@ function M.diff(opts)
     if _session then _close_session(_session) end
     _session = session
 
-    _register_autocmds(session)
     _build_layout(session)
+    _open_list(session)
 
-    vim.fn.setqflist({}, " ", {
-        title            = _QF_TITLE,
-        items            = entries,
-        quickfixtextfunc = function(info)
-            local items = vim.fn.getqflist({ id = info.id, items = 1 }).items
-            local out = {}
-            for i = info.start_idx, info.end_idx do
-                local e       = items[i]
-                local ud      = e.user_data and e.user_data[_ENTRY_KEY]
-                local label   = e.filename
-                if ud then
-                    if ud.left_rel and ud.right_rel and ud.left_rel ~= ud.right_rel then
-                        label = _rename_label(ud.left_rel, ud.right_rel)
-                    else
-                        label = ud.right_rel or ud.left_rel
-                    end
-                end
-                out[#out + 1] = string.format("%s %s", e.text or "*", label)
-            end
-            return out
-        end,
-    })
-
-    -- The quickfix window can only be opened once the list is populated.
-    vim.cmd("botright copen")
-    local qfwin = vim.fn.getqflist({ winid = 0 }).winid
-    if qfwin ~= 0 then
-        session.qf_win = qfwin
-        _highlight_qflist(vim.api.nvim_win_get_buf(qfwin))
-        -- Closing the quickfix list on its own also collapses the session, so
-        -- the user only ever needs one close to get back to a single window.
-        vim.api.nvim_create_autocmd("WinClosed", {
-            group    = session.group,
-            pattern  = tostring(qfwin),
-            callback = function() vim.schedule(function() _close_session(session) end) end,
-        })
-    end
-    vim.api.nvim_set_current_win(session.right_win)
-    vim.cmd.cfirst()
-
-    -- Bootstrap the first entry's diff explicitly rather than leaning on the
-    -- BufWinEnter that `:cfirst` happens to fire: that event doesn't fire when
-    -- the (possibly reused) right window already displays the first entry's
-    -- file, which would otherwise leave the diff unbuilt. The shown_idx guard
-    -- in _setup_diff keeps this from double-building in the common case.
-    local entry = _current_diff_entry()
-    if entry then _setup_diff(session, entry) end
+    -- Focus the list and build the first entry's diff. Setting the cursor to
+    -- line 1 (its default) won't fire CursorMoved, so drive the first setup
+    -- explicitly; the shown_line guard keeps a later move onto line 1 a no-op.
+    vim.api.nvim_set_current_win(session.list_win)
+    vim.api.nvim_win_set_cursor(session.list_win, { 1, 0 })
+    local entry, lnum = _entry_at_cursor(session)
+    if entry and lnum then _setup_diff(session, entry, lnum) end
 end
 
 return M
