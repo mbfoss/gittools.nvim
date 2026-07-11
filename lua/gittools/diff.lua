@@ -205,16 +205,21 @@ local function _close_session(session)
     end
     if survivor and vim.api.nvim_win_is_valid(survivor) then
         vim.api.nvim_win_call(survivor, function() vim.cmd("diffoff") end)
+        -- If the surviving window is left showing one of our generated temp
+        -- buffers (e.g. a rev-vs-rev diff, where neither side is the real
+        -- worktree file), swap it for a fresh empty buffer rather than parking
+        -- the user on a throwaway git:// scratch buffer.
+        if vim.tbl_contains(session.buffers, vim.api.nvim_win_get_buf(survivor)) then
+            vim.api.nvim_win_call(survivor, function() vim.cmd("enew") end)
+        end
     end
     session.left_win  = nil
     session.right_win = nil
 
-    -- Delete the generated buffers, but spare whichever one is still shown in
-    -- the surviving window so it doesn't blank out under the user.
-    local keep = survivor and vim.api.nvim_win_is_valid(survivor)
-        and vim.api.nvim_win_get_buf(survivor) or nil
+    -- Delete the generated buffers. Any that was still shown in the surviving
+    -- window was swapped out above, so none blanks out under the user.
     for _, bufnr in ipairs(session.buffers) do
-        if bufnr ~= keep and vim.api.nvim_buf_is_valid(bufnr) then
+        if vim.api.nvim_buf_is_valid(bufnr) then
             pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
         end
     end
