@@ -19,26 +19,26 @@ local git = require("gittools.git")
 
 --- One diff session, living in a vertical split of the window it was launched
 --- from. It owns its two split windows, the generated buffers, and the
---- location list attached to its right window. On teardown it collapses back
---- to a single window so the original layout is restored.
+--- quickfix list driving navigation. On teardown it collapses back to a single
+--- window so the original layout is restored.
 ---@class GitTools.DiffSession
 ---@field group      integer   augroup id for this session's autocmds
 ---@field left_win   integer?  window for the left (base/source) side
----@field right_win  integer?  window for the right (target/live) side; owns the loclist
----@field loclist_win integer? the location-list window (records it so we can
----                            still close it once right_win is gone)
+---@field right_win  integer?  window for the right (target/live) side
+---@field qf_win     integer?  the quickfix window (records it so we can still
+---                            close it once the split windows are gone)
 ---@field buffers    integer[] generated virtual buffers to delete on close
 ---@field closing    boolean   reentrancy guard for close()
 ---@field setting_up boolean   reentrancy guard to stop infinite event loops
----@field shown_idx  integer?  loclist index whose diff is currently built, so
+---@field shown_idx  integer?  quickfix index whose diff is currently built, so
 ---                            a repeat setup for the same entry is a no-op
 
 local _ENTRY_KEY = "gittools.diff"
 
--- setloclist `title`, used both to populate the list and to recognize (in
--- the QuickFixCmdPost guard below) whether the right window's location list
--- is still ours or has been overwritten by an unrelated :lvimgrep/:laddexpr.
-local _LOCLIST_TITLE = "GitTool Diff Layout"
+-- setqflist `title`, used both to populate the list and to recognize (in
+-- the QuickFixCmdPost guard below) whether the quickfix list is still ours or
+-- has been overwritten by an unrelated :vimgrep/:grep/:cexpr.
+local _QF_TITLE = "GitTool Diff Layout"
 
 -- Only a single diff session exists at a time; opening a new diff tears down
 -- the previous one (see M.diff). nil when idle.
@@ -47,7 +47,7 @@ local _session   = nil
 local _next_id   = 0
 
 -- Status letters (mirroring `git status --short`) rendered at the start of
--- each location-list line, and the highlight group each links to by default.
+-- each quickfix line, and the highlight group each links to by default.
 -- Linked to the builtin `Diagnostic*` groups rather than `Diff*`: those are
 -- mostly background fills meant for whole lines, so on a single character
 -- they read as an easy-to-miss colored speck (only `Title`, used for R/C in
@@ -133,13 +133,13 @@ local function _rename_label(old_rel, new_rel)
     return table.concat(parts)
 end
 
---- Color each location-list line by its leading status letter (see
---- `_STATUS_HL`). Rename/copy lines additionally get their arrow colored to
---- match the status letter, and the superseded (old) path dimmed. Scoped to
---- `bufnr` alone so it can't bleed into unrelated quickfix/location-list
---- windows elsewhere in the session.
+--- Color each quickfix line by its leading status letter (see `_STATUS_HL`).
+--- Rename/copy lines additionally get their arrow colored to match the status
+--- letter, and the superseded (old) path dimmed. Scoped to `bufnr` alone so it
+--- can't bleed into unrelated quickfix/location-list windows elsewhere in the
+--- session.
 ---@param bufnr integer
-local function _highlight_loclist(bufnr)
+local function _highlight_qflist(bufnr)
     vim.api.nvim_buf_call(bufnr, function()
         for status, pair in pairs(_STATUS_HL) do
             local pattern = status == "?" and [[^?]] or ("^" .. status .. [[\>]])
@@ -160,10 +160,10 @@ local function _notify(msg, level)
     vim.notify("[gittools] " .. msg, level or vim.log.levels.INFO)
 end
 
---- Tear down `session`: drop its autocmds, close the location list, collapse
+--- Tear down `session`: drop its autocmds, close the quickfix list, collapse
 --- the side-by-side split back to a single surviving window (so the original
 --- layout is restored), and delete its generated buffers. Safe to invoke at
---- any point, whichever of the split windows or the loclist the user closed.
+--- any point, whichever of the split windows or the quickfix list the user closed.
 ---@param session GitTools.DiffSession
 local function _close_session(session)
     if session.closing then return end
@@ -175,21 +175,18 @@ local function _close_session(session)
     -- don't re-trigger teardown through our own WinClosed hooks.
     vim.api.nvim_del_augroup_by_id(session.group)
 
-    -- The loclist window survives nvim_win_close of its owner; close it first.
-    -- Prefer the window recorded at open time: once right_win (the list's
-    -- owner) has itself been closed, getloclist can no longer locate the list,
-    -- so a lookup keyed on right_win would miss it and leave the loclist window
-    -- behind.
-    local llwin = session.loclist_win
-    if not (llwin and vim.api.nvim_win_is_valid(llwin))
-        and session.right_win and vim.api.nvim_win_is_valid(session.right_win) then
-        local found = vim.fn.getloclist(session.right_win, { winid = 0 }).winid
-        llwin = found ~= 0 and found or nil
+    -- The quickfix window survives nvim_win_close of the split windows; close
+    -- it first. Prefer the window recorded at open time, falling back to a live
+    -- lookup in case it was opened again after ours was closed.
+    local qfwin = session.qf_win
+    if not (qfwin and vim.api.nvim_win_is_valid(qfwin)) then
+        local found = vim.fn.getqflist({ winid = 0 }).winid
+        qfwin = found ~= 0 and found or nil
     end
-    if llwin and vim.api.nvim_win_is_valid(llwin) then
-        pcall(vim.api.nvim_win_close, llwin, false)
+    if qfwin and vim.api.nvim_win_is_valid(qfwin) then
+        pcall(vim.api.nvim_win_close, qfwin, false)
     end
-    session.loclist_win = nil
+    session.qf_win = nil
 
     -- Keep exactly one of the two split windows so the layout collapses back
     -- to a single window. Prefer the right (target/worktree) side; fall back
@@ -281,13 +278,10 @@ local function _make_git_buf(session, root, side, rel, side_label, filetype)
     return buf
 end
 
---- Extract the session's current location-list item if it belongs to us
----@param session GitTools.DiffSession
+--- Extract the current quickfix item if it belongs to us
 ---@return table? entry
-local function _current_diff_entry(session)
-    local win = session.right_win
-    if not (win and vim.api.nvim_win_is_valid(win)) then return nil end
-    local info = vim.fn.getloclist(win, { idx = 0, items = 1, size = 1 })
+local function _current_diff_entry()
+    local info = vim.fn.getqflist({ idx = 0, items = 1, size = 1 })
     if info.size == 0 then return nil end
 
     local entry = info.items[info.idx]
@@ -312,9 +306,9 @@ local function _setup_diff(session, entry)
 
     -- Skip if the currently selected entry's diff is already built. Lets the
     -- initial setup be driven explicitly (see M.diff) while any redundant
-    -- BufWinEnter for the same entry -- e.g. the one `:lfirst` fires -- is a
+    -- BufWinEnter for the same entry -- e.g. the one `:cfirst` fires -- is a
     -- harmless no-op rather than a second, buffer-leaking rebuild.
-    local idx = vim.fn.getloclist(rw, { idx = 0 }).idx
+    local idx = vim.fn.getqflist({ idx = 0 }).idx
     if session.shown_idx == idx then
         session.setting_up = false
         return
@@ -347,7 +341,7 @@ end
 
 --- Split the current window into the side-by-side diff layout, reusing the
 --- launching window as the left side and a vertical split as the right side.
---- Closing either split window (or, once registered, the location list) tears
+--- Closing either split window (or, once registered, the quickfix list) tears
 --- the session down and collapses back to a single window.
 ---@param session GitTools.DiffSession
 local function _build_layout(session)
@@ -379,27 +373,25 @@ local function _register_autocmds(session)
             if session.setting_up then return end
             local win = vim.api.nvim_get_current_win()
             if win ~= session.left_win and win ~= session.right_win then return end
-            local entry = _current_diff_entry(session)
+            local entry = _current_diff_entry()
             if not entry then return end
             vim.schedule(function() _setup_diff(session, entry) end)
         end,
     })
 
-    -- Commands like :lvimgrep, :lgrep, or :laddexpr silently replace the
-    -- right window's location list (and drop our quickfixtextfunc), leaving
-    -- the loclist buffer's `syntax match` status-letter highlighting behind
-    -- to mismatch against unrelated content. Detect the takeover via the
-    -- list title and tear the session down rather than let it show stale
-    -- highlights over a list it no longer owns.
+    -- Commands like :vimgrep, :grep, or :cexpr silently replace the quickfix
+    -- list (and drop our quickfixtextfunc), leaving the quickfix buffer's
+    -- `syntax match` status-letter highlighting behind to mismatch against
+    -- unrelated content. Detect the takeover via the list title and tear the
+    -- session down rather than let it show stale highlights over a list it no
+    -- longer owns. Fires for location-list commands too, but those don't touch
+    -- the quickfix list, so the title check leaves the session intact.
     vim.api.nvim_create_autocmd("QuickFixCmdPost", {
         group    = session.group,
-        pattern  = "l*",
+        pattern  = "*",
         callback = function()
-            if not (session.right_win and vim.api.nvim_win_is_valid(session.right_win)) then
-                return
-            end
-            local info = vim.fn.getloclist(session.right_win, { title = 1 })
-            if info.title ~= _LOCLIST_TITLE then
+            local info = vim.fn.getqflist({ title = 1 })
+            if info.title ~= _QF_TITLE then
                 vim.schedule(function() _close_session(session) end)
             end
         end,
@@ -541,8 +533,8 @@ end
 ---@field root   string?   repo root to diff in (default: the root containing the editor's cwd)
 
 --- Diff the requested revisions/index/working-tree sides by splitting the
---- current window, driving a location list of changed paths and a
---- side-by-side native diff. Closing either split window or the location list
+--- current window, driving a quickfix list of changed paths and a
+--- side-by-side native diff. Closing either split window or the quickfix list
 --- collapses back to a single window, restoring the original layout.
 ---@param opts GitTools.DiffOpts?
 function M.diff(opts)
@@ -601,7 +593,7 @@ function M.diff(opts)
         group      = vim.api.nvim_create_augroup("gittools.diff." .. _next_id, { clear = true }),
         left_win    = nil,
         right_win   = nil,
-        loclist_win = nil,
+        qf_win      = nil,
         buffers    = {},
         closing    = false,
         setting_up = false,
@@ -616,11 +608,11 @@ function M.diff(opts)
     _register_autocmds(session)
     _build_layout(session)
 
-    vim.fn.setloclist(session.right_win, {}, " ", {
-        title            = _LOCLIST_TITLE,
+    vim.fn.setqflist({}, " ", {
+        title            = _QF_TITLE,
         items            = entries,
         quickfixtextfunc = function(info)
-            local items = vim.fn.getloclist(info.winid, { id = info.id, items = 1 }).items
+            local items = vim.fn.getqflist({ id = info.id, items = 1 }).items
             local out = {}
             for i = info.start_idx, info.end_idx do
                 local e       = items[i]
@@ -639,29 +631,29 @@ function M.diff(opts)
         end,
     })
 
-    -- The loclist window can only be opened once its window has a list.
-    vim.api.nvim_win_call(session.right_win, function() vim.cmd("botright lopen") end)
-    local llwin = vim.fn.getloclist(session.right_win, { winid = 0 }).winid
-    if llwin ~= 0 then
-        session.loclist_win = llwin
-        _highlight_loclist(vim.api.nvim_win_get_buf(llwin))
-        -- Closing the location list on its own also collapses the session, so
+    -- The quickfix window can only be opened once the list is populated.
+    vim.cmd("botright copen")
+    local qfwin = vim.fn.getqflist({ winid = 0 }).winid
+    if qfwin ~= 0 then
+        session.qf_win = qfwin
+        _highlight_qflist(vim.api.nvim_win_get_buf(qfwin))
+        -- Closing the quickfix list on its own also collapses the session, so
         -- the user only ever needs one close to get back to a single window.
         vim.api.nvim_create_autocmd("WinClosed", {
             group    = session.group,
-            pattern  = tostring(llwin),
+            pattern  = tostring(qfwin),
             callback = function() vim.schedule(function() _close_session(session) end) end,
         })
     end
     vim.api.nvim_set_current_win(session.right_win)
-    vim.cmd.lfirst()
+    vim.cmd.cfirst()
 
     -- Bootstrap the first entry's diff explicitly rather than leaning on the
-    -- BufWinEnter that `:lfirst` happens to fire: that event doesn't fire when
+    -- BufWinEnter that `:cfirst` happens to fire: that event doesn't fire when
     -- the (possibly reused) right window already displays the first entry's
     -- file, which would otherwise leave the diff unbuilt. The shown_idx guard
     -- in _setup_diff keeps this from double-building in the common case.
-    local entry = _current_diff_entry(session)
+    local entry = _current_diff_entry()
     if entry then _setup_diff(session, entry) end
 end
 
