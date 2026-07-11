@@ -392,8 +392,7 @@ local function _make_list_buf(session)
     return buf
 end
 
---- Open the file list in a bottom split, wire its cursor-driven diff preview
---- and the `<CR>` / `q` maps.
+--- Open the file list in a bottom split and wire the `<CR>` / `q` maps.
 ---@param session GitTools.DiffSession
 local function _open_list(session)
     local buf = _make_list_buf(session)
@@ -414,17 +413,6 @@ local function _open_list(session)
     vim.wo[win].cursorline     = true
     session.list_win = win
 
-    -- Moving the cursor onto a different file rebuilds the side-by-side diff
-    -- for it (a live preview), staying in the list so the user keeps browsing.
-    vim.api.nvim_create_autocmd("CursorMoved", {
-        group    = session.group,
-        buffer   = buf,
-        callback = function()
-            local entry, lnum = _entry_at_cursor(session)
-            if entry and lnum then _setup_diff(session, entry, lnum) end
-        end,
-    })
-
     -- Closing the list on its own also collapses the session, so the user only
     -- ever needs one close to get back to a single window.
     vim.api.nvim_create_autocmd("WinClosed", {
@@ -433,14 +421,13 @@ local function _open_list(session)
         callback = function() vim.schedule(function() _close_session(session) end) end,
     })
 
+    -- <CR> shows the file under the cursor in the diff panes but keeps focus in
+    -- the list, so the user can flip through files with <CR> and only step up
+    -- into the diff (via <C-w>k) once they land on one they want to read.
     vim.keymap.set("n", "<CR>", function()
         local entry, lnum = _entry_at_cursor(session)
-        if not (entry and lnum) then return end
-        _setup_diff(session, entry, lnum)
-        if session.right_win and vim.api.nvim_win_is_valid(session.right_win) then
-            vim.api.nvim_set_current_win(session.right_win)
-        end
-    end, { buffer = buf, desc = "Focus the diff for the file under the cursor" })
+        if entry and lnum then _setup_diff(session, entry, lnum) end
+    end, { buffer = buf, desc = "Show the diff for the file under the cursor" })
 
     vim.keymap.set("n", "q", function() _close_session(session) end,
         { buffer = buf, desc = "Close the diff" })
@@ -581,11 +568,12 @@ end
 ---@field root   string?   repo root to diff in (default: the root containing the editor's cwd)
 
 --- Diff the requested revisions/index/working-tree sides by splitting the
---- current window, driving a custom file list (in a bottom split) whose cursor
---- selects the file shown in a side-by-side native diff. Moving the cursor in
---- the list live-previews that file; `<CR>` focuses the diff and `q` closes it.
---- Closing either split window or the file list collapses back to a single
---- window, restoring the original layout.
+--- current window, driving a custom file list (in a bottom split) that selects
+--- the file shown in a side-by-side native diff. `<CR>` shows the file under
+--- the cursor (staying in the list, so the user can flip through files);
+--- `<C-w>k` steps up into the diff and `q` closes it. Closing either split
+--- window or the file list collapses back to a single window, restoring the
+--- original layout.
 ---@param opts GitTools.DiffOpts?
 function M.diff(opts)
     opts = opts or {}
@@ -658,9 +646,10 @@ function M.diff(opts)
     _build_layout(session)
     _open_list(session)
 
-    -- Focus the list and build the first entry's diff. Setting the cursor to
-    -- line 1 (its default) won't fire CursorMoved, so drive the first setup
-    -- explicitly; the shown_line guard keeps a later move onto line 1 a no-op.
+    -- Focus the list and show the first entry's diff up front, so the layout
+    -- opens on a real diff rather than empty panes; the user then flips through
+    -- the rest with <CR>. The shown_line guard makes a later <CR> on line 1 a
+    -- no-op.
     vim.api.nvim_set_current_win(session.list_win)
     vim.api.nvim_win_set_cursor(session.list_win, { 1, 0 })
     local entry, lnum = _entry_at_cursor(session)
