@@ -38,6 +38,7 @@ end
 ---@field root    string
 ---@field buf     integer?
 ---@field win     integer?
+---@field origin  integer?  window the log was launched from; the diff reuses it
 ---@field flagged string?
 ---@field entries GitTools.LogEntry[]           by buffer line
 ---@field line_of table<string, integer>        hash -> buffer line
@@ -189,18 +190,32 @@ local function _entry_at_cursor(session)
     return (entry and entry.hash) and entry or nil
 end
 
+--- Close the log split and return focus to the window it was launched from, so
+--- a diff opened next reuses that window instead of splitting new panes on top
+--- of the (bottom) log split. Returns the root to diff in.
+---@param session GitTools.LogSession
+---@return string root
+local function _handoff_to_diff(session)
+    local root, origin = session.root, session.origin
+    _end_log()
+    if origin and vim.api.nvim_win_is_valid(origin) then
+        vim.api.nvim_set_current_win(origin)
+    end
+    return root
+end
+
 --- Diff `entry` against its first parent (or the empty tree, for a root
---- commit) -- i.e. show what that commit itself changed. Leaves the log
---- split open -- `gittools.diff` opens the comparison in a fresh tab, so the
---- log stays put for further browsing.
+--- commit) -- i.e. show what that commit itself changed. Closes the log split
+--- and reuses the window it was launched from for the diff.
 ---@param session GitTools.LogSession
 ---@param entry   GitTools.LogEntry
 local function _diff_against_parent(session, entry)
+    local root = _handoff_to_diff(session)
     local parent = entry.parents[1]
-    if parent and git.verify_rev(session.root, parent) then
-        difftool.diff({ revs = { parent, entry.hash }, root = session.root })
+    if parent and git.verify_rev(root, parent) then
+        difftool.diff({ revs = { parent, entry.hash }, root = root })
     else
-        difftool.diff({ revs = { _EMPTY_TREE, entry.hash }, root = session.root })
+        difftool.diff({ revs = { _EMPTY_TREE, entry.hash }, root = root })
     end
 end
 
@@ -208,6 +223,9 @@ end
 --- the `gd` / `c` / `q` maps.
 ---@param session GitTools.LogSession
 local function _show(session)
+    -- Remember the window the log is launched from (before the split below) so
+    -- diffs can reuse it rather than pile new splits onto the log window.
+    session.origin = vim.api.nvim_get_current_win()
     _end_log()
 
     local buf = ui.create_scratch_buffer(false, {
@@ -251,7 +269,8 @@ local function _show(session)
         -- A different commit was already flagged: diff it against the one
         -- just flagged.
         if old and old ~= entry.hash then
-            difftool.diff({ revs = { old, entry.hash }, root = session.root })
+            local root = _handoff_to_diff(session)
+            difftool.diff({ revs = { old, entry.hash }, root = root })
         end
     end, { buffer = buf, desc = "Flag commit, diffing against the previous flag if any" })
 

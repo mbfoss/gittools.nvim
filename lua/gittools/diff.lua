@@ -30,6 +30,8 @@ local git = require("gittools.git")
 ---@field buffers    integer[] generated virtual buffers to delete on close
 ---@field closing    boolean   reentrancy guard for close()
 ---@field setting_up boolean   reentrancy guard to stop infinite event loops
+---@field shown_idx  integer?  loclist index whose diff is currently built, so
+---                            a repeat setup for the same entry is a no-op
 
 local _ENTRY_KEY = "gittools.diff"
 
@@ -302,6 +304,17 @@ local function _setup_diff(session, entry)
         session.setting_up = false
         return
     end
+
+    -- Skip if the currently selected entry's diff is already built. Lets the
+    -- initial setup be driven explicitly (see M.diff) while any redundant
+    -- BufWinEnter for the same entry -- e.g. the one `:lfirst` fires -- is a
+    -- harmless no-op rather than a second, buffer-leaking rebuild.
+    local idx = vim.fn.getloclist(rw, { idx = 0 }).idx
+    if session.shown_idx == idx then
+        session.setting_up = false
+        return
+    end
+    session.shown_idx = idx
 
     ---@type GitTools.EntryData
     local ud = entry.user_data[_ENTRY_KEY]
@@ -587,6 +600,7 @@ function M.diff(opts)
         buffers    = {},
         closing    = false,
         setting_up = false,
+        shown_idx  = nil,
     }
     -- Only a single diff at a time: tear down any existing session before
     -- building the new one. Done here, after every early return above, so a
@@ -636,6 +650,14 @@ function M.diff(opts)
     end
     vim.api.nvim_set_current_win(session.right_win)
     vim.cmd.lfirst()
+
+    -- Bootstrap the first entry's diff explicitly rather than leaning on the
+    -- BufWinEnter that `:lfirst` happens to fire: that event doesn't fire when
+    -- the (possibly reused) right window already displays the first entry's
+    -- file, which would otherwise leave the diff unbuilt. The shown_idx guard
+    -- in _setup_diff keeps this from double-building in the common case.
+    local entry = _current_diff_entry(session)
+    if entry then _setup_diff(session, entry) end
 end
 
 return M
