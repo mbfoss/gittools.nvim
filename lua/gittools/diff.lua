@@ -204,13 +204,24 @@ local function _close_session(session)
     local right_valid = session.right_win and vim.api.nvim_win_is_valid(session.right_win)
     local survivor    = (right_valid and session.right_win) or (left_valid and session.left_win) or nil
 
+    -- Turn off diff mode on every split window up front, before any of them is
+    -- closed. `diffthis` sets window-local flags (diff, scrollbind, cursorbind,
+    -- foldmethod=diff, foldcolumn, ...); the window being closed discards its
+    -- own, but a pane showing a real worktree-file buffer can leave that buffer
+    -- diff-highlighted in any other window still displaying it. Clearing both
+    -- sides here guarantees no diff flag / highlight survives the teardown.
+    for _, win in ipairs({ session.left_win, session.right_win }) do
+        if win and vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_win_call(win, function() vim.cmd("diffoff!") end)
+        end
+    end
+
     for _, win in ipairs({ session.left_win, session.right_win }) do
         if win and win ~= survivor and vim.api.nvim_win_is_valid(win) then
             pcall(vim.api.nvim_win_close, win, false)
         end
     end
     if survivor and vim.api.nvim_win_is_valid(survivor) then
-        vim.api.nvim_win_call(survivor, function() vim.cmd("diffoff") end)
         -- If the surviving window is left showing one of our generated temp
         -- buffers (e.g. a rev-vs-rev diff, where neither side is the real
         -- worktree file), swap it for a fresh empty buffer rather than parking
