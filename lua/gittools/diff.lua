@@ -1,7 +1,7 @@
-local M   = {}
+local M          = {}
 
-local git = require("gittools.git")
-local ui  = require("gittools.util.ui")
+local git        = require("gittools.git")
+local ui         = require("gittools.util.ui")
 
 --- One side of a comparison. Exactly one field is set.
 ---@class GitTools.Side
@@ -59,11 +59,11 @@ local _next_id   = 0
 -- they're guaranteed to exist in any Neovim >= 0.6 regardless of colorscheme.
 -- `default = true` lets colorschemes/users override without editing here.
 local _STATUS_HL = {
-    A = { "GitToolsStatusAdded",     "DiagnosticOk" },
-    M = { "GitToolsStatusModified",  "DiagnosticWarn" },
-    D = { "GitToolsStatusDeleted",   "DiagnosticError" },
-    R = { "GitToolsStatusRenamed",   "DiagnosticInfo" },
-    C = { "GitToolsStatusCopied",    "DiagnosticHint" },
+    A = { "GitToolsStatusAdded", "DiagnosticOk" },
+    M = { "GitToolsStatusModified", "DiagnosticWarn" },
+    D = { "GitToolsStatusDeleted", "DiagnosticError" },
+    R = { "GitToolsStatusRenamed", "DiagnosticInfo" },
+    C = { "GitToolsStatusCopied", "DiagnosticHint" },
     ["?"] = { "GitToolsStatusUntracked", "Comment" },
 }
 
@@ -194,8 +194,8 @@ local function _close_session(session)
     if session.list_win and vim.api.nvim_win_is_valid(session.list_win) then
         pcall(vim.api.nvim_win_close, session.list_win, false)
     end
-    session.list_win = nil
-    session.list_buf = nil
+    session.list_win  = nil
+    session.list_buf  = nil
 
     -- Keep exactly one of the two split windows so the layout collapses back
     -- to a single window. Prefer the right (target/worktree) side; fall back
@@ -411,7 +411,8 @@ local function _open_list(session)
     vim.wo[win].number         = false
     vim.wo[win].relativenumber = false
     vim.wo[win].cursorline     = true
-    session.list_win = win
+    vim.wo[win].winfixheight   = true
+    session.list_win           = win
 
     -- Closing the list on its own also collapses the session, so the user only
     -- ever needs one close to get back to a single window.
