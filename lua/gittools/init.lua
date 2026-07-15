@@ -32,25 +32,6 @@ local merge    = require("gittools.merge")
 
 local _AUGROUP = "gittools"
 
----@class GitTools.Config
----@field merge GitTools.MergeConfig?
-
----@return GitTools.Config
-local function _get_default_config()
-    ---@type GitTools.Config
-    return {
-        merge = {
-            -- Open the conflict view automatically when a conflicted file is
-            -- read. The check behind this is a stat plus a table lookup on the
-            -- common path; see `gittools.merge`.
-            auto = true,
-        },
-    }
-end
-
----@type GitTools.Config
-M.config = _get_default_config()
-
 ---@param msg string
 ---@param level integer?
 local function _notify(msg, level)
@@ -90,11 +71,7 @@ local function _split_sep(args)
 end
 
 --- Register `:GitTool`. Auto-called by the central module loader.
----@param opts GitTools.Config?
-function M.setup(opts)
-    M.config = vim.tbl_deep_extend("force", _get_default_config(), opts or {})
-    merge.setup(M.config.merge)
-
+function M.setup()
     local group = vim.api.nvim_create_augroup(_AUGROUP, { clear = true })
     vim.api.nvim_create_autocmd("VimLeavePre", {
         group    = group,

@@ -26,10 +26,6 @@ local git = require("gittools.git")
 --- stages, checks out, or otherwise mutates the repository -- `git mergetool`
 --- stages `$MERGED` itself on exit, and that division keeps this module as
 --- read-only toward git as the rest of the plugin.
----
---- With `merge.auto` set (the default), opening a conflicted file starts the
---- view for you; see `_is_conflicted` for how that check stays cheap enough to
---- sit on every `BufReadPost`.
 
 ---@param msg string
 ---@param level integer?
@@ -379,18 +375,12 @@ local function _jump(session, dir)
     local target
     if dir > 0 then
         for _, h in ipairs(hunks) do
-            if h.s_lnum > lnum then
-                target = h
-                break
-            end
+            if h.s_lnum > lnum then target = h break end
         end
         target = target or hunks[1]
     else
         for i = #hunks, 1, -1 do
-            if hunks[i].e_lnum < lnum then
-                target = hunks[i]
-                break
-            end
+            if hunks[i].e_lnum < lnum then target = hunks[i] break end
         end
         target = target or hunks[#hunks]
     end
@@ -457,11 +447,11 @@ local function _open_diff(session)
         return
     end
 
-    local ft    = vim.bo[session.buf].filetype
+    local ft = vim.bo[session.buf].filetype
     local left  = _make_side_buf(session, session.sides.local_path, "local", ft)
     local right = _make_side_buf(session, session.sides.remote_path, "remote", ft)
 
-    local mid   = vim.api.nvim_get_current_win()
+    local mid = vim.api.nvim_get_current_win()
     vim.cmd("leftabove vsplit")
     local left_win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(left_win, left)
@@ -672,10 +662,8 @@ function M.merge(opts)
     end
 
     -- Repaint on every edit so the bands follow both our resolutions and the
-    -- user's own; schedule so the parse sees the settled buffer. BufReadPost is
-    -- in here too: an `:edit!` after the conflict was settled outside the editor
-    -- would otherwise leave the old bands painted over the new contents.
-    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufReadPost" }, {
+    -- user's own; schedule so the parse sees the settled buffer.
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
         group    = session.group,
         buffer   = buf,
         callback = function()
@@ -688,108 +676,6 @@ function M.merge(opts)
         group    = session.group,
         buffer   = buf,
         callback = function() vim.schedule(_end_merge) end,
-    })
-end
-
----@class GitTools.MergeConfig
----@field auto boolean  open the conflict view automatically on reading a conflicted file
-
----@type GitTools.MergeConfig
-local _config = { auto = true }
---- git dir -> { key = index identity, paths = set of conflicted repo-relative paths }
-
----@param abs string
----@param cb fun(conflicted:boolean)
-local function _is_conflicted(abs, cb)
-    local root = vim.fs.root(vim.fs.dirname(abs), ".git")
-    if not root then
-        return cb(false)
-    end
-
-    local rel = git.relpath(root, abs)
-    if not rel then
-        return cb(false)
-    end
-
-    git.async_run(root, {
-        "diff",
-        "--name-only",
-        "--diff-filter=U",
-        "--",
-        rel,
-    }, function(out, err)
-        if err then
-            cb(false)
-            return
-        end
-        cb(out ~= "")
-    end)
-end
-
---- Guard against re-entering through the BufReadPost that `M.merge`'s own
---- `bufload` could raise.
-local _opening = false
-
-local function _on_read(args)
-    local buf = args.buf
-    if _opening or not vim.api.nvim_buf_is_valid(buf) then
-        return
-    end
-    if not vim.api.nvim_buf_is_loaded(buf) then
-        return
-    end
-    if vim.bo[buf].buftype ~= "" then
-        return
-    end
-    if buf ~= vim.api.nvim_get_current_buf() then
-        return
-    end
-    if _session and _session.buf == buf then
-        return
-    end
-
-    local abs = vim.api.nvim_buf_get_name(buf)
-    if abs == "" then
-        return
-    end
-
-    _is_conflicted(abs, function(conflicted)
-        -- Buffer may have disappeared or changed while git was running.
-        if not conflicted
-            or _opening
-            or not vim.api.nvim_buf_is_valid(buf)
-            or buf ~= vim.api.nvim_get_current_buf()
-        then
-            return
-        end
-
-        if vim.api.nvim_buf_get_name(buf) ~= abs then
-            return
-        end
-
-        _opening = true
-        local ok, err = pcall(M.merge, {})
-        _opening = false
-
-        if not ok then
-            _notify("auto-open failed: " .. tostring(err), vim.log.levels.ERROR)
-        end
-    end)
-end
-
---- Wire up auto-detection. Called by `gittools.setup`; safe to call again to
---- change `auto` at runtime.
----@param config GitTools.MergeConfig?
-function M.setup(config)
-    _config = vim.tbl_deep_extend("force", { auto = true }, config or {})
-
-    local group = vim.api.nvim_create_augroup("gittools.merge.auto", { clear = true })
-    if not _config.auto then return end
-
-    vim.api.nvim_create_autocmd("BufReadPost", {
-        group    = group,
-        callback = _on_read,
-        desc     = "Open the merge view when reading a conflicted file",
     })
 end
 

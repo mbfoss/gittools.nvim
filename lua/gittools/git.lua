@@ -37,25 +37,6 @@ function M.run_raw(cwd, args, stdin)
     return res.stdout or "", nil
 end
 
---- Run `git <args>` in `cwd` asynchronously.
----@param cwd string
----@param args string[]
----@param cb fun(stdout:string?, stderr:string?)
----@return vim.SystemObj
-function M.async_run(cwd, args, cb)
-    local cmd = { "git" }
-    vim.list_extend(cmd, args)
-    return vim.system(cmd, { text = true, cwd = cwd }, function(res)
-        vim.schedule(function()
-            if res.code == 0 then
-                cb(vim.trim(res.stdout or ""), nil)
-            else
-                cb(nil, vim.trim(res.stderr or ""))
-            end
-        end)
-    end)
-end
-
 --- Re-merge `local_path`/`base`/`remote` and return the result in diff3 style,
 --- i.e. with `|||||||` base sections, on stdout. Used to recover base text for a
 --- conflict when the repo's `merge.conflictStyle` left it out of the file.
