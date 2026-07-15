@@ -39,12 +39,26 @@ as your mergetool:
 ```ini
 [mergetool "gittools"]
     cmd = nvim -c "GitTool merge \"$LOCAL\" \"$BASE\" \"$REMOTE\" \"$MERGED\""
-    trustExitCode = true
+    trustExitCode = false
 [merge]
     tool = gittools
 ```
 
 Then `git mergetool` opens each conflicted file in turn.
+
+`trustExitCode = false` matters here. This view never writes `$MERGED` for you --
+resolving is an edit and `:w` is how it lands -- so quitting with `:q` leaves the
+file untouched and exits 0. With `trustExitCode = true` git would read that 0 as
+"resolved" and stage the file with its conflict markers still in it. With it
+`false`, git instead checks whether the file actually changed: if you saved, it
+accepts the resolution silently; if you didn't, it tells you
+
+```
+$MERGED seems unchanged.
+Was the merge successful [y/n]?
+```
+
+and leaves the conflict in place if you answer `n`.
 
 ### Maps
 
