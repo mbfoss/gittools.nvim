@@ -6,6 +6,7 @@ local difftool = require("gittools.diff")
 local diffthis = require("gittools.diffthis")
 local logtool  = require("gittools.log")
 local blame    = require("gittools.blame")
+local merge    = require("gittools.merge")
 
 --- `:GitTool` -- a git-backed front end for Neovim's native diff facilities.
 ---   GitTool diff [--staged] [<rev> [<rev>]]   directory diff via the built-in
@@ -20,9 +21,13 @@ local blame    = require("gittools.blame")
 ---                                             same way as log
 ---   GitTool blame                             annotate the current buffer in
 ---                                             a scroll-bound blame sidebar
+---   GitTool merge [$LOCAL $BASE $REMOTE       resolve conflicts inline in
+---                 $MERGED]                    $MERGED; with no arguments the
+---                                             four sides are read from the
+---                                             current file's index stages
 --- This module owns only command registration and argument parsing; the work
 --- lives in `gittools.diff` / `gittools.diffthis` / `gittools.log` /
---- `gittools.blame`.
+--- `gittools.blame` / `gittools.merge`.
 
 local _AUGROUP = "gittools"
 
@@ -69,7 +74,10 @@ function M.setup()
     local group = vim.api.nvim_create_augroup(_AUGROUP, { clear = true })
     vim.api.nvim_create_autocmd("VimLeavePre", {
         group    = group,
-        callback = difftool.clear_session,
+        callback = function()
+            difftool.clear_session()
+            merge.clear_session()
+        end,
     })
 
     usercmd.register_user_cmd("GitTool", function(_, args)
@@ -108,13 +116,23 @@ function M.setup()
                 return
             end
             blame.blame()
+        elseif sub == "merge" then
+            local paths = { unpack(args, 2) }
+            if #paths == 0 then
+                merge.merge({})
+            elseif #paths == 4 then
+                merge.merge({ paths = paths })
+            else
+                _notify("GitTool merge takes no arguments, or exactly four "
+                    .. "($LOCAL $BASE $REMOTE $MERGED)", vim.log.levels.ERROR)
+            end
         else
             vim.api.nvim_echo({{"Argument required", "Error"}}, false, {})
         end
     end, {
         desc          = "Git diff via Neovim's native diff tools",
         subcommand_fn = function(_, rest, arg_lead)
-            if #rest == 0 then return { "diff", "diffthis", "log", "graph", "stashlist", "blame" } end
+            if #rest == 0 then return { "diff", "diffthis", "log", "graph", "stashlist", "blame", "merge" } end
 
             local sub = rest[1]
             if sub == "diff" then
@@ -131,6 +149,8 @@ function M.setup()
                 return out
             elseif sub == "diffthis" then
                 return git.refs()
+            elseif sub == "merge" then
+                return vim.fn.getcompletion(arg_lead, "file")
             elseif sub == "log" or sub == "graph" then
                 local has_sep = false
                 for _, a in ipairs(rest) do

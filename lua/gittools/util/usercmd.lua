@@ -1,5 +1,10 @@
 local M = {}
 
+--- Split a command line into arguments on unescaped whitespace, honouring
+--- backslash escapes and shell-style quoting. Quoting matters because git hands
+--- paths to a mergetool pre-quoted (`cmd = ... "$LOCAL" "$MERGED"`) so that
+--- paths containing spaces survive; without it those quotes would land inside
+--- the argument and name a file that doesn't exist.
 ---@param str string
 ---@return string[]
 local function _split_args(str)
@@ -7,26 +12,43 @@ local function _split_args(str)
     local i = 1
     local len = #str
     local part = {}
+    local quote = nil
+    -- Tracked separately from `#part`, so a deliberately empty argument ("")
+    -- still counts as one rather than vanishing.
+    local started = false
+
+    local function flush()
+        if started then
+            table.insert(args, table.concat(part))
+            part, started = {}, false
+        end
+    end
 
     while i <= len do
         local c = str:sub(i, i)
         if c == '\\' and i < len then
             table.insert(part, str:sub(i + 1, i + 1))
+            started = true
             i = i + 2
+        elseif quote then
+            -- Inside quotes whitespace is literal; only the matching close
+            -- quote ends the run.
+            if c == quote then quote = nil else table.insert(part, c) end
+            i = i + 1
+        elseif c == '"' or c == "'" then
+            quote = c
+            started = true
+            i = i + 1
         elseif c:match('%s') then
-            if #part > 0 then
-                table.insert(args, table.concat(part))
-                part = {}
-            end
+            flush()
             i = i + 1
         else
             table.insert(part, c)
+            started = true
             i = i + 1
         end
     end
-    if #part > 0 then
-        table.insert(args, table.concat(part))
-    end
+    flush()
     return args
 end
 

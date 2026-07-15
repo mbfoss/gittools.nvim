@@ -37,6 +37,27 @@ function M.run_raw(cwd, args, stdin)
     return res.stdout or "", nil
 end
 
+--- Re-merge `local_path`/`base`/`remote` and return the result in diff3 style,
+--- i.e. with `|||||||` base sections, on stdout. Used to recover base text for a
+--- conflict when the repo's `merge.conflictStyle` left it out of the file.
+---
+--- Needs its own runner rather than `run_raw`: `git merge-file` exits with the
+--- *number of conflicts* it found (truncated to 127) and only goes negative --
+--- which the shell reports as >= 128 -- on a genuine error. A conflicted merge
+--- therefore exits non-zero on success, which `run_raw` would report as failure.
+---@param cwd        string
+---@param local_path string
+---@param base       string
+---@param remote     string
+---@return string? stdout
+function M.merge_file_diff3(cwd, local_path, base, remote)
+    local res = vim.system({
+        "git", "merge-file", "--diff3", "-p", local_path, base, remote,
+    }, { text = true, cwd = cwd }):wait()
+    if res.code < 0 or res.code >= 128 then return nil end
+    return res.stdout or ""
+end
+
 --- Split git's newline-delimited path output into a list, dropping blanks.
 ---@param out string?
 ---@return string[]
