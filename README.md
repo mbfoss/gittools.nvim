@@ -41,34 +41,39 @@ Then `git mergetool` opens each conflicted file in turn.
 
 ### Maps
 
+All conflict maps share an `x` prefix, matching the `]x` / `[x` motions:
+
 | key | action |
 | --- | --- |
-| `co` | accept **c**urrent (ours) |
-| `ct` | accept incoming (**t**heirs) |
-| `cb` | accept **b**oth, current first |
-| `cB` | accept the common ancestor (**B**ase) |
+| `xo` | accept **o**urs (current) |
+| `xt` | accept **t**heirs (incoming) |
+| `xb` | accept **b**oth, ours first |
+| `xa` | accept the common **a**ncestor (base) |
 | `]x` / `[x` | jump to the next / previous conflict |
-| `cD` | toggle the `$LOCAL` \| `$MERGED` \| `$REMOTE` three-way diff |
+| `xd` | toggle the `$LOCAL` \| `$MERGED` \| `$REMOTE` three-way **d**iff |
+
+These are buffer-local to `$MERGED`, but note that while they are active a bare
+`x` (delete character) waits `'timeoutlen'` to see whether one of them follows.
 
 Accepting only edits the buffer -- save with `:w` as usual. Nothing here stages
 or checks out; `git mergetool` stages `$MERGED` itself on exit.
 
 ### Base text
 
-`cB` needs the common ancestor. If you set
+`xa` needs the common ancestor. If you set
 
 ```ini
 [merge]
     conflictStyle = zdiff3
 ```
 
-git writes the base into the conflict markers itself and `cB` reads it straight
+git writes the base into the conflict markers itself and `xa` reads it straight
 from the buffer. Otherwise gittools recovers it by re-merging the three inputs
 with `git merge-file --diff3`, matching conflicts by position. That
 correspondence only holds while the file's conflicts still line up with a fresh
-merge, so once you have hand-edited or resolved some regions `cB` declines
+merge, so once you have hand-edited or resolved some regions `xa` declines
 rather than paste in text from the wrong place. `zdiff3` is the more reliable
-setup. An add/add conflict has no ancestor at all, so `cB` never applies there.
+setup. An add/add conflict has no ancestor at all, so `xa` never applies there.
 
 ### Highlights
 

@@ -16,9 +16,9 @@ local git = require("gittools.git")
 --- band, an optional Base band, and an Incoming band. Buffer-local maps resolve
 --- the region under the cursor:
 ---
----   co / ct / cb / cB   accept current / incoming / both / base
+---   xo / xt / xb / xa   accept ours / theirs / both / ancestor (base)
 ---   ]x / [x             jump to the next / previous conflict
----   cD                  open the $LOCAL | $MERGED | $REMOTE three-way diff
+---   xd                  open the $LOCAL | $MERGED | $REMOTE three-way diff
 ---
 --- Accepting only edits the buffer; the user saves with `:w`. Nothing here
 --- stages, checks out, or otherwise mutates the repository -- `git mergetool`
@@ -69,7 +69,7 @@ end
 --- The active merge session. Only one exists at a time. nil when idle.
 ---@class GitTools.MergeSession
 ---@field buf         integer               the $MERGED file buffer
----@field win         integer               the window holding it (the middle pane under cD)
+---@field win         integer               the window holding it (the middle pane under xd)
 ---@field sides       GitTools.MergeSides
 ---@field group       integer               the session's autocmd group
 ---@field hunks       GitTools.MergeHunk[]  last parse, 1:1 with the bands on screen
@@ -77,8 +77,8 @@ end
 ---@field tmp         string[]              tempfiles to unlink on teardown
 ---@field base_texts  string[][]?           lazy `merge-file --diff3` base fallback, by hunk index
 ---@field base_tried  boolean               guard: the fallback shells out at most once
----@field diff_wins   integer[]?            the cD three-way panes, when open
----@field diff_bufs   integer[]?            the cD scratch buffers, when open
+---@field diff_wins   integer[]?            the xd three-way panes, when open
+---@field diff_bufs   integer[]?            the xd scratch buffers, when open
 ---@type GitTools.MergeSession?
 local _session = nil
 
@@ -245,7 +245,7 @@ local function _render(session)
         end
 
         vim.api.nvim_buf_set_extmark(buf, _ns, h.s_lnum - 1, 0, {
-            virt_text     = { { "  co current · ct incoming · cb both · cB base · cD diff",
+            virt_text     = { { "  xo ours · xt theirs · xb both · xa base · xd diff",
                 "GitToolsMergeLabel" } },
             virt_text_pos = "eol",
             strict        = false,
@@ -408,9 +408,36 @@ local function _make_side_buf(session, path, label, ft)
     return buf
 end
 
+--- Give the three panes equal shares of the width they collectively occupy.
+---
+--- Worth doing explicitly. Each `vsplit` halves the window it splits, so the
+--- panes are born 50/25/25; that only looks right when 'equalalways' happens to
+--- be on, and even then it equalises every window in the tab, so an unrelated
+--- split elsewhere quietly takes a share of the diff's space. Sizing them here
+--- makes the layout the same either way.
+---@param wins integer[]  the panes, left to right
+local function _equalize(wins)
+    local total = 0
+    for _, win in ipairs(wins) do
+        total = total + vim.api.nvim_win_get_width(win)
+    end
+
+    -- Widths exclude the separator columns between panes, which the splits
+    -- already took out of the total, so thirds of what's left is the honest
+    -- share. The middle pane absorbs the rounding remainder.
+    local share = math.floor(total / 3)
+    for _, win in ipairs({ wins[1], wins[3] }) do
+        pcall(vim.api.nvim_win_set_width, win, share)
+    end
+end
+
 --- Open `$LOCAL | $MERGED | $REMOTE` side by side, for hunks too gnarly to
 --- resolve inline. The middle pane is the live file, so the inline bands and
 --- maps keep working while the diff is up.
+---
+--- Both splits are made from the `$MERGED` window with explicit `leftabove` /
+--- `rightbelow`, so the three land adjacent in that order regardless of
+--- 'splitright' and of whatever else is already on screen.
 ---@param session GitTools.MergeSession
 local function _open_diff(session)
     if session.diff_wins then
@@ -435,6 +462,8 @@ local function _open_diff(session)
     for _, win in ipairs({ left_win, mid, right_win }) do
         vim.api.nvim_win_call(win, vim.cmd.diffthis)
     end
+    -- After diffthis: entering diff mode adds a foldcolumn, which shifts widths.
+    _equalize({ left_win, mid, right_win })
     vim.api.nvim_set_current_win(mid)
 
     session.diff_wins = { left_win, mid, right_win }
@@ -464,11 +493,11 @@ local function _set_keymaps(session)
         session.maps[#session.maps + 1] = lhs
     end
 
-    map("co", function() _accept(session, "ours") end, "Accept current (ours) for this conflict")
-    map("ct", function() _accept(session, "theirs") end, "Accept incoming (theirs) for this conflict")
-    map("cb", function() _accept(session, "both") end, "Accept both sides, current first")
-    map("cB", function() _accept(session, "base") end, "Accept the common ancestor (base)")
-    map("cD", function() _open_diff(session) end, "Toggle the $LOCAL | $MERGED | $REMOTE three-way diff")
+    map("xo", function() _accept(session, "ours") end, "Accept ours (current) for this conflict")
+    map("xt", function() _accept(session, "theirs") end, "Accept theirs (incoming) for this conflict")
+    map("xb", function() _accept(session, "both") end, "Accept both sides, ours first")
+    map("xa", function() _accept(session, "base") end, "Accept the common ancestor (base)")
+    map("xd", function() _open_diff(session) end, "Toggle the $LOCAL | $MERGED | $REMOTE three-way diff")
     map("]x", function() _jump(session, 1) end, "Jump to the next conflict")
     map("[x", function() _jump(session, -1) end, "Jump to the previous conflict")
 end
