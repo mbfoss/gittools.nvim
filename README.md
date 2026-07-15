@@ -11,7 +11,7 @@ under a single `:GitTool` command.
 | `GitTool graph [<rev>] [-- <path>]` | like `log`, with `git log --graph` rail drawing |
 | `GitTool stashlist` | browse `git stash list` the same way as `log` |
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
-| `GitTool merge [$LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
+| `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
 
 ## `GitTool merge`
 
@@ -19,15 +19,22 @@ Shows the `$MERGED` file in a normal, editable buffer with each conflict region
 painted as a Current / Base / Incoming band, and adds buffer-local maps to
 resolve them.
 
-With no arguments it infers the four sides from the index stages of the current
-file, so on any conflicted file you can just:
+It takes three forms:
 
 ```vim
-:GitTool merge
+:GitTool merge                  " the current buffer's file
+:GitTool merge path/to/file     " that file, from anywhere
+:GitTool merge $LOCAL $BASE $REMOTE $MERGED
 ```
 
-With four arguments it follows git's classic mergetool calling convention. To
-use it as your mergetool:
+The first two name only `$MERGED` -- explicitly, or implicitly as the current
+buffer -- and recover the other three sides from that file's index stages, so
+they work on any conflicted file in the repo. The single-file form is handy for
+jumping straight to a conflict from a file list without opening it first (it
+completes paths, so `:GitTool merge <Tab>` works).
+
+The four-argument form is git's classic mergetool calling convention. To use it
+as your mergetool:
 
 ```ini
 [mergetool "gittools"]

@@ -21,10 +21,11 @@ local merge    = require("gittools.merge")
 ---                                             same way as log
 ---   GitTool blame                             annotate the current buffer in
 ---                                             a scroll-bound blame sidebar
----   GitTool merge [$LOCAL $BASE $REMOTE       resolve conflicts inline in
----                 $MERGED]                    $MERGED; with no arguments the
----                                             four sides are read from the
----                                             current file's index stages
+---   GitTool merge [<file> | $LOCAL $BASE      resolve conflicts inline in
+---                 $REMOTE $MERGED]            $MERGED; given one file (or
+---                                             none, meaning the current
+---                                             buffer) the other three sides
+---                                             are read from its index stages
 --- This module owns only command registration and argument parsing; the work
 --- lives in `gittools.diff` / `gittools.diffthis` / `gittools.log` /
 --- `gittools.blame` / `gittools.merge`.
@@ -118,13 +119,12 @@ function M.setup()
             blame.blame()
         elseif sub == "merge" then
             local paths = { unpack(args, 2) }
-            if #paths == 0 then
-                merge.merge({})
-            elseif #paths == 4 then
+            if #paths <= 1 or #paths == 4 then
                 merge.merge({ paths = paths })
             else
-                _notify("GitTool merge takes no arguments, or exactly four "
-                    .. "($LOCAL $BASE $REMOTE $MERGED)", vim.log.levels.ERROR)
+                _notify("GitTool merge takes no arguments, a single file, or "
+                    .. "exactly four ($LOCAL $BASE $REMOTE $MERGED)",
+                    vim.log.levels.ERROR)
             end
         else
             vim.api.nvim_echo({{"Argument required", "Error"}}, false, {})

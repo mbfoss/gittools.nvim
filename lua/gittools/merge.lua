@@ -2,14 +2,16 @@ local M   = {}
 
 local git = require("gittools.git")
 
---- The conflict-resolution feature behind `:GitTool merge`. It serves two entry
---- points with one implementation:
+--- The conflict-resolution feature behind `:GitTool merge`. It serves three
+--- entry points with one implementation:
 ---
 ---   :GitTool merge $LOCAL $BASE $REMOTE $MERGED   git's classic mergetool
 ---                                                 four-file calling convention
----   :GitTool merge                                infer the four sides from the
----                                                 index stages of the current
----                                                 (conflicted) buffer
+---   :GitTool merge <file>                         that file is $MERGED; the
+---                                                 other three sides come from
+---                                                 its index stages
+---   :GitTool merge                                as above, for the current
+---                                                 buffer's file
 ---
 --- The view is the `$MERGED` file itself -- a normal, editable, saveable buffer
 --- -- with each conflict region painted the way VSCode paints them: a Current
@@ -516,15 +518,14 @@ local function _spill(session, blob)
     return path
 end
 
---- Resolve the four sides from the current buffer's index stages: 1 = base,
---- 2 = ours, 3 = theirs, with `$MERGED` being the worktree file itself. Stage 1
---- is absent for an add/add conflict, which simply leaves the base unavailable.
----@param session GitTools.MergeSession
----@return GitTools.MergeSides?
-local function _sides_from_index(session)
+--- The `$MERGED` file for the no-argument form: whatever the current buffer is
+--- editing.
+---@return string?
+local function _current_file()
     local buf = vim.api.nvim_get_current_buf()
     if vim.bo[buf].buftype ~= "" then
-        _notify("GitTool merge needs a normal file buffer", vim.log.levels.WARN)
+        _notify("GitTool merge needs a normal file buffer, or a file argument",
+            vim.log.levels.WARN)
         return nil
     end
 
@@ -533,8 +534,16 @@ local function _sides_from_index(session)
         _notify("Current buffer has no file name", vim.log.levels.WARN)
         return nil
     end
-    abs = vim.fn.fnamemodify(abs, ":p")
+    return vim.fn.fnamemodify(abs, ":p")
+end
 
+--- Resolve the four sides from `abs`'s index stages: 1 = base, 2 = ours,
+--- 3 = theirs, with `$MERGED` being the worktree file itself. Stage 1 is absent
+--- for an add/add conflict, which simply leaves the base unavailable.
+---@param session GitTools.MergeSession
+---@param abs     string  absolute path to the conflicted file
+---@return GitTools.MergeSides?
+local function _sides_from_index(session, abs)
     local root = git.root(vim.fs.dirname(abs))
     if not root then
         _notify("Not inside a git repository", vim.log.levels.WARN)
@@ -575,9 +584,15 @@ local function _sides_from_index(session)
 end
 
 ---@class GitTools.MergeOpts
----@field paths string[]?  $LOCAL $BASE $REMOTE $MERGED; nil = infer from the buffer
+---@field paths string[]?  one of: nothing (use the current buffer), a single
+---                        `$MERGED` path, or all four of
+---                        `$LOCAL $BASE $REMOTE $MERGED`
 
---- Open the conflict view for `opts.paths`, or for the current buffer.
+--- Open the conflict view.
+---
+--- The four-path form is git's mergetool convention and is taken at face value.
+--- Both shorter forms name only `$MERGED` -- explicitly, or implicitly as the
+--- current buffer -- and recover the other three sides from its index stages.
 ---@param opts GitTools.MergeOpts?
 function M.merge(opts)
     opts = opts or {}
@@ -590,21 +605,32 @@ function M.merge(opts)
         base_tried = false,
     }
 
+    local paths = opts.paths or {}
     local sides
-    if opts.paths then
-        local p = opts.paths
-        local base = vim.fn.fnamemodify(p[2], ":p")
+    if #paths == 4 then
+        local base = vim.fn.fnamemodify(paths[2], ":p")
         -- git hands over a $BASE path even for an add/add conflict, where the
         -- file is empty; treat that as "no common ancestor".
         local has_base = vim.fn.filereadable(base) == 1 and vim.fn.getfsize(base) > 0
         sides = {
-            local_path  = vim.fn.fnamemodify(p[1], ":p"),
+            local_path  = vim.fn.fnamemodify(paths[1], ":p"),
             base_path   = has_base and base or nil,
-            remote_path = vim.fn.fnamemodify(p[3], ":p"),
-            merged_path = vim.fn.fnamemodify(p[4], ":p"),
+            remote_path = vim.fn.fnamemodify(paths[3], ":p"),
+            merged_path = vim.fn.fnamemodify(paths[4], ":p"),
         }
     else
-        sides = _sides_from_index(session)
+        ---@type string?
+        local abs
+        if paths[1] then
+            abs = vim.fn.fnamemodify(paths[1], ":p")
+            if vim.fn.filereadable(abs) == 0 then
+                _notify("No such file: " .. paths[1], vim.log.levels.WARN)
+                abs = nil
+            end
+        else
+            abs = _current_file()
+        end
+        sides = abs and _sides_from_index(session, abs) or nil
     end
 
     if not sides then
