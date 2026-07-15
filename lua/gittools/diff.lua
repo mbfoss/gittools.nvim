@@ -433,13 +433,41 @@ local function _open_list(session)
         callback = function() vim.schedule(function() _close_session(session) end) end,
     })
 
-    -- <CR> shows the file under the cursor in the diff panes but keeps focus in
-    -- the list, so the user can flip through files with <CR> and only step up
-    -- into the diff (via <C-w>k) once they land on one they want to read.
-    vim.keymap.set("n", "<CR>", function()
+    -- Show the file under the cursor in the diff panes, staying in the list.
+    local function show_at_cursor()
         local entry, lnum = _entry_at_cursor(session)
         if entry and lnum then _setup_diff(session, entry, lnum) end
-    end, { buffer = buf, desc = "Show the diff for the file under the cursor" })
+    end
+
+    -- Move the list cursor `delta` rows (clamped to the list) and show that
+    -- file's diff, leaving focus in the list.
+    local function step(delta)
+        local lwin = session.list_win
+        if not (lwin and vim.api.nvim_win_is_valid(lwin)) then return end
+        local lnum = vim.api.nvim_win_get_cursor(lwin)[1]
+        local target = math.max(1, math.min(#session.entries, lnum + delta))
+        if target ~= lnum then
+            vim.api.nvim_win_set_cursor(lwin, { target, 0 })
+        end
+        show_at_cursor()
+    end
+
+    -- <CR> activates the file under the cursor: show its diff and step up into
+    -- the diff pane so the user can read/navigate it directly.
+    vim.keymap.set("n", "<CR>", function()
+        show_at_cursor()
+        local rw = session.right_win
+        if rw and vim.api.nvim_win_is_valid(rw) then
+            vim.api.nvim_set_current_win(rw)
+        end
+    end, { buffer = buf, desc = "Open the diff for the file under the cursor" })
+
+    -- ]c / [c flip to the next / previous file's diff without leaving the list
+    -- (what <CR> used to do), so the user can browse changes from the picker.
+    vim.keymap.set("n", "]c", function() step(1) end,
+        { buffer = buf, desc = "Show the next file's diff" })
+    vim.keymap.set("n", "[c", function() step(-1) end,
+        { buffer = buf, desc = "Show the previous file's diff" })
 
     vim.keymap.set("n", "q", function() _close_session(session) end,
         { buffer = buf, desc = "Close the diff" })
