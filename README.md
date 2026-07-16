@@ -6,12 +6,42 @@ under a single `:GitTool` command.
 | command | what it does |
 | --- | --- |
 | `GitTool diff [--staged] [<rev> [<rev>]]` | directory diff: file list + side-by-side layout |
+| `GitTool diffpaths <a> <b>` | diff two files or two directories off disk (no repo needed) |
 | `GitTool diffthis [<rev>]` | diff the current buffer, including unsaved edits |
 | `GitTool log [<rev>] [-- <path>]` | browse commit history as an interactive list |
 | `GitTool graph [<rev>] [-- <path>]` | like `log`, with `git log --graph` rail drawing |
 | `GitTool stashlist` | browse `git stash list` the same way as `log` |
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
 | `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
+
+## `GitTool diffpaths`
+
+Diffs two arbitrary paths off disk in the same file-list + side-by-side layout
+as `GitTool diff`, with no repository involved. Both paths must be the same
+kind:
+
+```vim
+:GitTool diffpaths old/config.lua new/config.lua   " two files
+:GitTool diffpaths ./before ./after               " two directories
+```
+
+Two files open straight into the diff. Two directories are compared recursively
+(via `git diff --no-index`) and every differing file becomes a row in the list,
+with added/deleted files showing an empty pane on the missing side. It completes
+paths, so `:GitTool diffpaths <Tab>` works.
+
+The two-argument form is also git's difftool calling convention, so gittools can
+serve as your `git difftool`:
+
+```ini
+[difftool "gittools_diff"]
+    cmd = nvim -c "GitTool diffpaths $LOCAL $REMOTE"
+[diff]
+    tool = gittools_diff
+```
+
+Then `git difftool` opens each changed file in the layout, and `git difftool -d`
+(directory mode) opens the whole change set at once.
 
 ## `GitTool merge`
 
@@ -37,11 +67,11 @@ The four-argument form is git's classic mergetool calling convention. To use it
 as your mergetool:
 
 ```ini
-[mergetool "gittools"]
+[mergetool "gittools_merge"]
     cmd = nvim -c "GitTool merge $LOCAL $BASE $REMOTE $MERGED"
     trustExitCode = false
 [merge]
-    tool = gittools
+    tool = gittools_merge
 ```
 
 Then `git mergetool` opens each conflicted file in turn.

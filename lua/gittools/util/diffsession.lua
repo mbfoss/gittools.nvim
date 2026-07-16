@@ -479,10 +479,10 @@ local function _open_list(session)
     -- the diff pane so the user can read/navigate it directly.
     vim.keymap.set("n", "<CR>", function()
         show_at_cursor()
-        local rw = session.right_win
-        if rw and vim.api.nvim_win_is_valid(rw) then
-            vim.api.nvim_set_current_win(rw)
-        end
+        --local rw = session.right_win
+        --if rw and vim.api.nvim_win_is_valid(rw) then
+        --    vim.api.nvim_set_current_win(rw)
+        --end
     end, { buffer = buf, desc = "Open the diff for the file under the cursor" })
 
     -- ]c / [c flip to the next / previous file's diff without leaving the list
