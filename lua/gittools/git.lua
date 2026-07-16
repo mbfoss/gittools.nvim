@@ -37,6 +37,28 @@ function M.run_raw(cwd, args, stdin)
     return res.stdout or "", nil
 end
 
+--- `git diff --no-index --name-status` between two filesystem paths (files or
+--- directories) that need not lie inside any repository. Needs its own runner
+--- rather than `run`: `git diff --no-index` exits 1 when the paths *differ*
+--- (its normal "found a diff" status, not an error) and only >= 2 on a real
+--- failure, which `run` would misreport. `core.quotePath=false` keeps non-ASCII
+--- paths literal so the caller can strip prefixes from them. Returns the raw
+--- name-status lines on stdout.
+---@param a string absolute path (left)
+---@param b string absolute path (right)
+---@return string? stdout
+---@return string? stderr
+function M.diff_no_index(a, b)
+    local res = vim.system({
+        "git", "-c", "core.quotePath=false",
+        "diff", "--no-index", "--name-status", "--", a, b,
+    }, { text = true }):wait()
+    if res.code >= 2 then
+        return nil, vim.trim(res.stderr or "")
+    end
+    return res.stdout or "", nil
+end
+
 --- Re-merge `local_path`/`base`/`remote` and return the result in diff3 style,
 --- i.e. with `|||||||` base sections, on stdout. Used to recover base text for a
 --- conflict when the repo's `merge.conflictStyle` left it out of the file.

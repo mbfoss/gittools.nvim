@@ -3,6 +3,7 @@ local M        = {}
 local usercmd  = require("gittools.util.usercmd")
 local git      = require("gittools.git")
 local difftool = require("gittools.diff")
+local diffpaths = require("gittools.diffpaths")
 local diffthis = require("gittools.diffthis")
 local logtool  = require("gittools.log")
 local blame    = require("gittools.blame")
@@ -11,6 +12,8 @@ local merge    = require("gittools.merge")
 --- `:GitTool` -- a git-backed front end for Neovim's native diff facilities.
 ---   GitTool diff [--staged] [<rev> [<rev>]]   directory diff via the built-in
 ---                                             difftool (file list + layout)
+---   GitTool diffpaths <a> <b>                 diff two files or two directories
+---                                             off disk (no repository needed)
 ---   GitTool diffthis [<rev>]                  diff the current buffer (incl.
 ---                                             unsaved edits) in a side split
 ---   GitTool log [<rev>] [-- <path>]           browse commit history as an
@@ -86,6 +89,14 @@ function M.setup()
         if sub == "diff" then
             local staged, revs = _parse_flags({ unpack(args, 2) })
             difftool.diff({ staged = staged, revs = revs })
+        elseif sub == "diffpaths" then
+            local paths = { unpack(args, 2) }
+            if #paths ~= 2 then
+                _notify("GitTool diffpaths takes exactly two paths (two files or two directories)",
+                    vim.log.levels.ERROR)
+                return
+            end
+            diffpaths.diffpaths(paths[1], paths[2])
         elseif sub == "diffthis" then
             local revs = { unpack(args, 2) }
             if #revs > 1 then
@@ -132,10 +143,12 @@ function M.setup()
     end, {
         desc          = "Git diff via Neovim's native diff tools",
         subcommand_fn = function(_, rest, arg_lead)
-            if #rest == 0 then return { "diff", "diffthis", "log", "graph", "stashlist", "blame", "merge" } end
+            if #rest == 0 then return { "diff", "diffpaths", "diffthis", "log", "graph", "stashlist", "blame", "merge" } end
 
             local sub = rest[1]
-            if sub == "diff" then
+            if sub == "diffpaths" then
+                return vim.fn.getcompletion(arg_lead, "file")
+            elseif sub == "diff" then
                 local out = {}
                 local has_flag = false
                 for _, a in ipairs(rest) do

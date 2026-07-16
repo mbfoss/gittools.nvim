@@ -38,7 +38,7 @@ as your mergetool:
 
 ```ini
 [mergetool "gittools"]
-    cmd = nvim -c "GitTool merge \"$LOCAL\" \"$BASE\" \"$REMOTE\" \"$MERGED\""
+    cmd = nvim -c "GitTool merge $LOCAL $BASE $REMOTE $MERGED"
     trustExitCode = false
 [merge]
     tool = gittools
