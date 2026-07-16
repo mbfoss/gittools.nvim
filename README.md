@@ -35,13 +35,18 @@ serve as your `git difftool`:
 
 ```ini
 [difftool "gittools_diff"]
-    cmd = nvim -c "GitTool diffpaths $LOCAL $REMOTE"
+    cmd = nvim -c \"GitTool diffpaths $LOCAL $REMOTE\"
 [diff]
     tool = gittools_diff
 ```
 
 Then `git difftool` opens each changed file in the layout, and `git difftool -d`
 (directory mode) opens the whole change set at once.
+
+The `\"` escaping is required: git's config parser strips a plain `"..."` from
+the value, which would leave nvim running a bare `GitTool` (no subcommand, so it
+reports `Argument required`) and treating the paths as files to open. Escaping
+keeps the quotes so the `-c` argument stays a single command.
 
 ## `GitTool merge`
 
@@ -68,7 +73,7 @@ as your mergetool:
 
 ```ini
 [mergetool "gittools_merge"]
-    cmd = nvim -c "GitTool merge $LOCAL $BASE $REMOTE $MERGED"
+    cmd = nvim -c \"GitTool merge $LOCAL $BASE $REMOTE $MERGED\"
     trustExitCode = false
 [merge]
     tool = gittools_merge
