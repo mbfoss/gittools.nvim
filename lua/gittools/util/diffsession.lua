@@ -362,6 +362,7 @@ local function _setup_diff(session, entry, lnum)
     local right_buf
     if ud.right.worktree and ud.right_rel then
         right_buf = vim.fn.bufadd(ud.root .. "/" .. ud.right_rel)
+        vim.bo[right_buf].swapfile = false
         vim.fn.bufload(right_buf)
     else
         right_buf = _make_side_buf(session, ud.root, ud.right, ud.right_rel, "right", filetype)
