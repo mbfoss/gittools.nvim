@@ -381,8 +381,8 @@ local function _setup_diff(session, entry, lnum)
 end
 
 --- Move the list cursor `delta` rows (clamped to the list) and show that file's
---- diff. Focus is left wherever it was -- in the list when driven by `[c`/`]c`,
---- in a diff pane when driven by the global `[C`/`]C` -- since only buffers are
+--- diff. Focus is left wherever it was -- the list, a diff pane, or anywhere
+--- else the global `[C`/`]C` was pressed from -- since only buffers are
 --- swapped, never the current window.
 ---@param session GitTools.DiffSession
 ---@param delta   integer
@@ -511,16 +511,6 @@ local function _open_list(session)
         --end
     end, { buffer = buf, desc = "Open the diff for the file under the cursor" })
 
-    -- ]c / [c flip to the next / previous file's diff without leaving the list
-    -- (what <CR> used to do), so the user can browse changes from the picker.
-    -- Buffer-local here because the list is the one place the lowercase pair is
-    -- free; the global `]C` / `[C` do the same from anywhere else, including the
-    -- diff panes, where `]c` / `[c` are the builtin hunk motions.
-    vim.keymap.set("n", "]c", function() _step(session, 1) end,
-        { buffer = buf, desc = "Show the next file's diff" })
-    vim.keymap.set("n", "[c", function() _step(session, -1) end,
-        { buffer = buf, desc = "Show the previous file's diff" })
-
     vim.keymap.set("n", "q", function() _close_session(session) end,
         { buffer = buf, desc = "Close the diff" })
 end
@@ -528,7 +518,7 @@ end
 --- Open a diff session over `items`: build the side-by-side layout, the driving
 --- file list, and show the first item up front (so the layout opens on a real
 --- diff rather than empty panes; the user flips through the rest with `<CR>` /
---- `]c` / `[c`). Tears down any existing session first -- done here, after the
+--- `]C` / `[C`). Tears down any existing session first -- done here, after the
 --- caller's early returns, so an invalid or empty request leaves the current
 --- session intact. Callers must pass a non-empty list.
 ---@param items GitTools.DiffItem[]
