@@ -380,6 +380,44 @@ local function _setup_diff(session, entry, lnum)
     session.setting_up = false
 end
 
+--- Move the list cursor `delta` rows (clamped to the list) and show that file's
+--- diff. Focus is left wherever it was -- in the list when driven by `[c`/`]c`,
+--- in a diff pane when driven by the global `[C`/`]C` -- since only buffers are
+--- swapped, never the current window.
+---@param session GitTools.DiffSession
+---@param delta   integer
+local function _step(session, delta)
+    local lwin = session.list_win
+    if not (lwin and vim.api.nvim_win_is_valid(lwin)) then return end
+    local lnum = vim.api.nvim_win_get_cursor(lwin)[1]
+    local target = math.max(1, math.min(#session.entries, lnum + delta))
+    if target ~= lnum then
+        vim.api.nvim_win_set_cursor(lwin, { target, 0 })
+    end
+    local entry = session.entries[target]
+    if entry then _setup_diff(session, entry, target) end
+end
+
+-- `[C` / `]C` step to the previous / next file of the active diff session, from
+-- any window: either diff pane, the file list, or anywhere else. Global (set
+-- once, at load) rather than buffer-local, so the motion works the moment a
+-- diff is open without wiring maps onto each generated buffer -- and, since the
+-- right pane can hold the user's real worktree-file buffer, without leaving
+-- stray maps behind in it once the session closes.
+--
+-- Uppercase because the builtin `[c` / `]c` (previous/next *hunk* within the
+-- current file's diff) has to keep working. A no-op when no session is open,
+-- which is also why claiming these globally is cheap: only one diff session
+-- exists at a time, and outside one the keys do nothing.
+for _, map in ipairs({
+    { lhs = "]C", delta = 1,  desc = "Show the next file's diff" },
+    { lhs = "[C", delta = -1, desc = "Show the previous file's diff" },
+}) do
+    vim.keymap.set("n", map.lhs, function()
+        if _session then _step(_session, map.delta) end
+    end, { desc = "gittools: " .. map.desc })
+end
+
 --- Split the current window into the side-by-side diff layout, reusing the
 --- launching window as the left side and a vertical split as the right side.
 --- Closing either split window (or, once registered, the file list) tears the
@@ -463,19 +501,6 @@ local function _open_list(session)
         if entry and lnum then _setup_diff(session, entry, lnum) end
     end
 
-    -- Move the list cursor `delta` rows (clamped to the list) and show that
-    -- file's diff, leaving focus in the list.
-    local function step(delta)
-        local lwin = session.list_win
-        if not (lwin and vim.api.nvim_win_is_valid(lwin)) then return end
-        local lnum = vim.api.nvim_win_get_cursor(lwin)[1]
-        local target = math.max(1, math.min(#session.entries, lnum + delta))
-        if target ~= lnum then
-            vim.api.nvim_win_set_cursor(lwin, { target, 0 })
-        end
-        show_at_cursor()
-    end
-
     -- <CR> activates the file under the cursor: show its diff and step up into
     -- the diff pane so the user can read/navigate it directly.
     vim.keymap.set("n", "<CR>", function()
@@ -488,9 +513,12 @@ local function _open_list(session)
 
     -- ]c / [c flip to the next / previous file's diff without leaving the list
     -- (what <CR> used to do), so the user can browse changes from the picker.
-    vim.keymap.set("n", "]c", function() step(1) end,
+    -- Buffer-local here because the list is the one place the lowercase pair is
+    -- free; the global `]C` / `[C` do the same from anywhere else, including the
+    -- diff panes, where `]c` / `[c` are the builtin hunk motions.
+    vim.keymap.set("n", "]c", function() _step(session, 1) end,
         { buffer = buf, desc = "Show the next file's diff" })
-    vim.keymap.set("n", "[c", function() step(-1) end,
+    vim.keymap.set("n", "[c", function() _step(session, -1) end,
         { buffer = buf, desc = "Show the previous file's diff" })
 
     vim.keymap.set("n", "q", function() _close_session(session) end,
