@@ -78,8 +78,10 @@ end
 --- Diff two filesystem paths that need not lie in any git repository: either
 --- two files, or two directories (compared recursively via `git diff
 --- --no-index`). Each differing file becomes a list entry in the same
---- side-by-side layout `:GitTool diff` uses; both sides are read-only. The two
---- paths must be the same kind (both files or both directories).
+--- side-by-side layout `:GitTool diff` uses. Both sides are the real files on
+--- disk, so either can be edited and written from inside the diff (Neovim
+--- marks a file it can't write 'readonly' as usual). The two paths must be the
+--- same kind (both files or both directories).
 ---@param a string left path (file or directory)
 ---@param b string right path (file or directory)
 function M.diffpaths(a, b)

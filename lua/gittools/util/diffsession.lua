@@ -321,6 +321,45 @@ local function _make_side_buf(session, root, side, rel, side_label, filetype)
     return buf
 end
 
+--- The absolute path of the real, on-disk file behind a Side -- the live
+--- worktree file, or a `path` Side's file -- or nil when there is none: a git
+--- blob snapshot (`rev`/`index`), or a side the file is absent from (an add or
+--- delete).
+---@param root string Repo root (for worktree sides)
+---@param side GitTools.Side
+---@param rel  string? Relative path on this side; nil if absent
+---@return string? path
+local function _real_file(root, side, rel)
+    if not rel then return nil end
+    if side.path then return side.path end
+    if side.worktree then return root .. "/" .. rel end
+    return nil
+end
+
+--- The buffer to show for one side of the diff. A side backed by a real file
+--- on disk is opened as that file's own buffer, so a writable file stays
+--- editable -- and `:w`-able -- from inside the diff; Neovim sets 'readonly'
+--- by itself for a file it can't write, so a read-only file still can't be
+--- edited by accident. Everything without a file behind it (git blobs, absent
+--- sides) gets the read-only scratch snapshot that dies with the session.
+---@param session GitTools.DiffSession
+---@param root string Repo root (for git-backed sides)
+---@param side GitTools.Side Side description
+---@param rel string? Relative path on this side; nil if absent
+---@param side_label string "left" or "right"
+---@param filetype string Syntax highlighting string
+---@return integer bufnr
+local function _side_buf(session, root, side, rel, side_label, filetype)
+    local path = _real_file(root, side, rel)
+    if not path then
+        return _make_side_buf(session, root, side, rel, side_label, filetype)
+    end
+    local buf = vim.fn.bufadd(path)
+    vim.bo[buf].swapfile = false
+    vim.fn.bufload(buf)
+    return buf
+end
+
 --- The entry (and its 1-based list line) under the cursor in the list window.
 ---@param session GitTools.DiffSession
 ---@return GitTools.DiffEntry? entry
@@ -359,16 +398,8 @@ local function _setup_diff(session, entry, lnum)
     local ud = entry.data
     local filetype = vim.filetype.match({ filename = ud.right_rel or ud.left_rel }) or ""
 
-    local right_buf
-    if ud.right.worktree and ud.right_rel then
-        right_buf = vim.fn.bufadd(ud.root .. "/" .. ud.right_rel)
-        vim.bo[right_buf].swapfile = false
-        vim.fn.bufload(right_buf)
-    else
-        right_buf = _make_side_buf(session, ud.root, ud.right, ud.right_rel, "right", filetype)
-    end
-
-    local left_buf = _make_side_buf(session, ud.root, ud.left, ud.left_rel, "left", filetype)
+    local right_buf = _side_buf(session, ud.root, ud.right, ud.right_rel, "right", filetype)
+    local left_buf  = _side_buf(session, ud.root, ud.left, ud.left_rel, "left", filetype)
 
     vim.api.nvim_win_set_buf(lw, left_buf)
     vim.api.nvim_win_set_buf(rw, right_buf)
@@ -557,12 +588,19 @@ function M.open(items)
     _build_layout(session)
     _open_list(session)
 
-    -- Focus the list and show the first entry's diff up front. The shown_line
-    -- guard makes a later <CR> on line 1 a no-op.
-    vim.api.nvim_set_current_win(session.list_win)
+    -- Show the first entry's diff up front. The shown_line guard makes a later
+    -- <CR> on line 1 a no-op.
     vim.api.nvim_win_set_cursor(session.list_win, { 1, 0 })
     local entry, lnum = _entry_at_cursor(session)
     if entry and lnum then _setup_diff(session, entry, lnum) end
+
+    -- Land in the right (target) pane rather than the list: the file itself is
+    -- what the user came to read -- and, where it's a writable on-disk file,
+    -- edit. The list still drives which file is shown, but `]f` / `[f` step
+    -- through it from here without leaving the diff.
+    if session.right_win and vim.api.nvim_win_is_valid(session.right_win) then
+        vim.api.nvim_set_current_win(session.right_win)
+    end
 end
 
 return M

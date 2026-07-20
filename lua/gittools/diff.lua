@@ -156,11 +156,13 @@ end
 
 --- Diff the requested revisions/index/working-tree sides by splitting the
 --- current window, driving a custom file list (in a bottom split) that selects
---- the file shown in a side-by-side native diff. `<CR>` shows the file under
---- the cursor (staying in the list, so the user can flip through files);
---- `<C-w>k` steps up into the diff and `q` closes it. Closing either split
---- window or the file list collapses back to a single window, restoring the
---- original layout.
+--- the file shown in a side-by-side native diff. It opens with the cursor in
+--- the right (target) pane, showing the first changed file; `]f` / `[f` step
+--- through the rest from there. `<C-w>j` drops into the list, where `<CR>`
+--- shows the file under the cursor (staying in the list, so the user can flip
+--- through files) and `q` closes the session. Closing either split window or
+--- the file list collapses back to a single window, restoring the original
+--- layout.
 ---@param opts GitTools.DiffOpts?
 function M.diff(opts)
     opts = opts or {}
