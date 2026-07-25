@@ -401,10 +401,21 @@ local function _setup_diff(session, entry, lnum)
     local right_buf = _side_buf(session, ud.root, ud.right, ud.right_rel, "right", filetype)
     local left_buf  = _side_buf(session, ud.root, ud.left, ud.left_rel, "left", filetype)
 
+    -- Turn diff mode off in each pane *while its current buffer is still shown*,
+    -- before swapping in the next file. A pane can hold the user's real
+    -- worktree-file buffer, and once such a buffer is displaced (hidden) it keeps
+    -- its membership in Neovim's internal set of diff'ed buffers -- a later
+    -- `diffoff` on the *windows* no longer reaches it. Re-displaying it (e.g.
+    -- jumping back to it with `<C-o>`) would then silently switch its window into
+    -- diff mode again, so stale diff highlights reappear long after the session
+    -- ended. Clearing the flag while the buffer is still on screen removes it
+    -- from that set for good.
+    vim.api.nvim_win_call(lw, function() vim.cmd("diffoff") end)
+    vim.api.nvim_win_call(rw, function() vim.cmd("diffoff") end)
+
     vim.api.nvim_win_set_buf(lw, left_buf)
     vim.api.nvim_win_set_buf(rw, right_buf)
 
-    vim.api.nvim_win_call(lw, function() vim.cmd("diffoff!") end)
     vim.api.nvim_win_call(rw, vim.cmd.diffthis)
     vim.api.nvim_win_call(lw, vim.cmd.diffthis)
 
