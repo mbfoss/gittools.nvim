@@ -18,7 +18,7 @@ local git = require("gittools.git")
 --- band, an optional Base band, and an Incoming band. Buffer-local maps resolve
 --- the region under the cursor:
 ---
----   xo / xt / xb / xa   accept ours / theirs / both / ancestor (base)
+---   xc / xi / xb / xa   accept current / incoming / both / base
 ---   ]x / [x             jump to the next / previous conflict
 ---   xd                  open the $LOCAL | $MERGED | $REMOTE three-way diff
 ---
@@ -247,7 +247,7 @@ local function _render(session)
         end
 
         vim.api.nvim_buf_set_extmark(buf, _ns, h.s_lnum - 1, 0, {
-            virt_text     = { { "  xo ours · xt theirs · xb both · xa base · xd diff",
+            virt_text     = { { "  xc current · xi incoming · xb both · xa base · xd diff",
                 "GitToolsMergeLabel" } },
             virt_text_pos = "eol",
             strict        = false,
@@ -495,10 +495,10 @@ local function _set_keymaps(session)
         session.maps[#session.maps + 1] = lhs
     end
 
-    map("xo", function() _accept(session, "ours") end, "Accept ours (current) for this conflict")
-    map("xt", function() _accept(session, "theirs") end, "Accept theirs (incoming) for this conflict")
-    map("xb", function() _accept(session, "both") end, "Accept both sides, ours first")
-    map("xa", function() _accept(session, "base") end, "Accept the common ancestor (base)")
+    map("xc", function() _accept(session, "ours") end, "Accept the current change (ours) for this conflict")
+    map("xi", function() _accept(session, "theirs") end, "Accept the incoming change (theirs) for this conflict")
+    map("xb", function() _accept(session, "both") end, "Accept both changes, current first")
+    map("xa", function() _accept(session, "base") end, "Accept the base (common ancestor)")
     map("xd", function() _open_diff(session) end, "Toggle the $LOCAL | $MERGED | $REMOTE three-way diff")
     map("]x", function() _jump(session, 1) end, "Jump to the next conflict")
     map("[x", function() _jump(session, -1) end, "Jump to the previous conflict")

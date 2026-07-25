@@ -101,10 +101,10 @@ All conflict maps share an `x` prefix, matching the `]x` / `[x` motions:
 
 | key | action |
 | --- | --- |
-| `xo` | accept **o**urs (current) |
-| `xt` | accept **t**heirs (incoming) |
-| `xb` | accept **b**oth, ours first |
-| `xa` | accept the common **a**ncestor (base) |
+| `xc` | accept the **c**urrent change (ours) |
+| `xi` | accept the **i**ncoming change (theirs) |
+| `xb` | accept **b**oth changes, current first |
+| `xa` | accept the b**a**se (common ancestor) |
 | `]x` / `[x` | jump to the next / previous conflict |
 | `xd` | toggle the `$LOCAL` \| `$MERGED` \| `$REMOTE` three-way **d**iff |
 
