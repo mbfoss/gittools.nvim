@@ -1,5 +1,8 @@
 local M = {}
 
+---@diagnostic disable-next-line: deprecated
+local unpack = table.unpack or unpack
+
 --- Split a command line into arguments on unescaped whitespace, honouring
 --- backslash escapes and shell-style quoting. Quoting matters because git hands
 --- paths to a mergetool pre-quoted (`cmd = ... "$LOCAL" "$MERGED"`) so that

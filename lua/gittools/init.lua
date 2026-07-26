@@ -1,5 +1,8 @@
 local M        = {}
 
+---@diagnostic disable-next-line: deprecated
+local unpack   = table.unpack or unpack
+
 local usercmd  = require("gittools.util.usercmd")
 local git      = require("gittools.git")
 local difftool = require("gittools.diff")
