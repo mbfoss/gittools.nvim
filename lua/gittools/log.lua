@@ -5,13 +5,13 @@ local difftool = require("gittools.diff")
 local ui   = require("gittools.util.ui")
 
 --- `:GitTool log [<rev>] [-- <path>]` -- commit history as a flat list in a
---- bottom split. `:GitTool graph [<rev>] [-- <path>]` -- the same, but with
---- `git log --graph` rail drawing in front of each commit. `:GitTool
---- stash_log` -- the stash list (`git stash list`) in the same kind of split,
---- each entry labeled with its `stash@{N}` selector instead of a hash. In all
---- three views `<CR>` diffs the commit under the cursor against its first
---- parent; `c` flags a commit, and if another commit was already flagged,
---- immediately diffs the two (via `gittools.diff`).
+--- bottom split. `:GitTool graph [<rev>] [-- <path>]` -- the same, but with a
+--- commit tree drawn in front of each commit in box-drawing glyphs, one colour
+--- per rail. `:GitTool stash_log` -- the stash list (`git stash list`) in the
+--- same kind of split, each entry labeled with its `stash@{N}` selector
+--- instead of a hash. In all three views `<CR>` diffs the commit under the
+--- cursor against its first parent; `c` flags a commit, and if another commit
+--- was already flagged, immediately diffs the two (via `gittools.diff`).
 
 local _LIMIT      = 500
 local _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -22,15 +22,17 @@ local function _notify(msg, level)
     vim.notify("[gittools] " .. msg, level or vim.log.levels.INFO)
 end
 
---- One buffer line. Rail-only lines of a graph (`|/`, `|\`, ...) carry no
---- commit and have only `rails` set.
+--- One buffer line. The link lines of a graph (the rows where rails merge or
+--- branch) carry no commit and have only `rails` set.
 ---@class GitTools.LogEntry
----@field rails   string    graph rail prefix; "" in the plain log view
+---@field rails   [string, string][]?  graph prefix as {text, highlight} chunks;
+---                          unset in the plain log and stash views
 ---@field hash    string?
 ---@field parents string[]?
 ---@field date    string?   author date, short (YYYY-MM-DD)
 ---@field author  string?   author name
 ---@field subject string?
+---@field refs    string?   ref decoration, e.g. "HEAD -> main, origin/main"
 ---@field ref     string?   display selector shown instead of the short hash,
 ---                          e.g. "stash@{0}"; unset outside the stash view
 
@@ -73,7 +75,7 @@ local function _parse_log(out)
             line:match("^(%x+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
         if hash then
             entries[#entries + 1] = {
-                rails = "", hash = hash, parents = _split_parents(parents),
+                hash = hash, parents = _split_parents(parents),
                 date = date, author = author, subject = subject,
             }
         end
@@ -81,26 +83,227 @@ local function _parse_log(out)
     return entries
 end
 
---- Parse `git log --graph --pretty=format:%x09%H%x09%P%x09%ad%x09%an%x09%s`
---- output. The leading tab in the format separates git's rail drawing from the
---- commit fields; lines without it are pure rail art between commits.
+--- Rail colours, cycled by column so neighbouring rails stay distinguishable.
+--- Linked with `default` so a colorscheme can override them, and (re)defined on
+--- every graph since `:colorscheme` clears them.
+local _RAIL_HL = { "GitToolsGraph1", "GitToolsGraph2", "GitToolsGraph3",
+    "GitToolsGraph4", "GitToolsGraph5", "GitToolsGraph6" }
+local _RAIL_LINK = { "Function", "String", "Identifier", "Type", "Constant", "Statement" }
+
+local function _define_rail_hl()
+    for i, name in ipairs(_RAIL_HL) do
+        vim.api.nvim_set_hl(0, name, { link = _RAIL_LINK[i], default = true })
+    end
+end
+
+---@param col integer  rail column, 1-based
+---@return string
+local function _rail_hl(col)
+    return _RAIL_HL[(col - 1) % #_RAIL_HL + 1]
+end
+
+--- Box-drawing glyphs keyed by which sides of the cell connect, as
+--- "<up><down><left><right>". Corners are the rounded variants, which is what
+--- gives merges and branch-offs their curve.
+local _BOX = {
+    ["1100"] = "│", ["1101"] = "├", ["1110"] = "┤", ["1111"] = "┼",
+    ["1010"] = "╯", ["1001"] = "╰", ["1011"] = "┴",
+    ["0110"] = "╮", ["0101"] = "╭", ["0111"] = "┬",
+    ["0011"] = "─", ["0010"] = "─", ["0001"] = "─",
+    ["1000"] = "│", ["0100"] = "│",
+}
+
+---@return string
+local function _box(up, down, left, right)
+    local key = (up and "1" or "0") .. (down and "1" or "0")
+        .. (left and "1" or "0") .. (right and "1" or "0")
+    return _BOX[key] or " "
+end
+
+local _DOT       = "●"  -- ordinary commit
+local _MERGE_DOT = "◆"  -- commit with more than one parent
+
+--- Turn per-cell `{char, rail column}` pairs into `{text, highlight}` chunks,
+--- runs of the same colour merged into one chunk.
+---@param cells {ch: string, col: integer}[]
+---@return [string, string][]
+local function _cells_to_chunks(cells)
+    local chunks = {}
+    for _, cell in ipairs(cells) do
+        local hl = _rail_hl(cell.col)
+        local last = chunks[#chunks]
+        if last and last[2] == hl then
+            last[1] = last[1] .. cell.ch
+        else
+            chunks[#chunks + 1] = { cell.ch, hl }
+        end
+    end
+    return chunks
+end
+
+--- Index of the first column with no rail in it, at or after `from`; one past
+--- the end if every column is taken. Reusing holes keeps the graph narrow.
+---@param cols (string|false)[]
+---@param from integer
+---@return integer
+local function _free_col(cols, from)
+    for i = from, #cols do
+        if not cols[i] then return i end
+    end
+    return #cols + 1
+end
+
+--- Lay the commits out into rails and draw them.
+---
+--- `cols[i]` is the hash the rail in column `i` is waiting for (`false` for an
+--- unused column). Walking the commits in topological order, each commit takes
+--- the leftmost column waiting for it (or a fresh one, if it is a branch tip
+--- nothing has referenced yet); its first parent inherits that column, any
+--- further parents open new ones, and every other column waiting for it is a
+--- branch merging in and ends here.
+---
+--- That yields three kinds of row: a commit row, with the commit's dot and a
+--- vertical through every other live column; above it, when other columns were
+--- waiting for the commit, a link row where those branches curve back in; and
+--- below it, when the commit is a merge, a link row where the extra parents
+--- curve out into columns of their own.
+---@param commits GitTools.LogEntry[]  in log order, `hash`/`parents` set
+---@return GitTools.LogEntry[]         commits interleaved with link rows
+local function _layout(commits)
+    local rows = {}
+    ---@type (string|false)[]
+    local cols = {}
+
+    --- One row of rails going from the column state `before` to `after`, with
+    --- a horizontal run from `anchor` out to each column in `ends`.
+    ---@param before (string|false)[]
+    ---@param after  (string|false)[]
+    ---@param anchor integer
+    ---@param ends   integer[]
+    ---@return {ch: string, col: integer}[]
+    local function link_cells(before, after, anchor, ends)
+        local lo, hi = anchor, anchor
+        for _, i in ipairs(ends) do
+            lo, hi = math.min(lo, i), math.max(hi, i)
+        end
+        local cells = {}
+        for i = 1, math.max(#before, #after) do
+            local span = i >= lo and i <= hi
+            cells[#cells + 1] = {
+                ch  = _box(before[i] and true or false, after[i] and true or false,
+                    span and i > lo, span and i < hi),
+                col = i,
+            }
+            -- The gap after the column: part of the horizontal run (and so the
+            -- anchor's colour) while it is still inside it.
+            local run = i >= lo and i < hi
+            cells[#cells + 1] = { ch = run and "─" or " ", col = run and anchor or i }
+        end
+        return cells
+    end
+
+    for _, commit in ipairs(commits) do
+        -- Columns waiting for this commit; the leftmost is the one it sits in,
+        -- the rest are branches merging into it.
+        local waiting = {}
+        for i = 1, #cols do
+            if cols[i] == commit.hash then waiting[#waiting + 1] = i end
+        end
+        local col = waiting[1]
+        if not col then
+            col = _free_col(cols, 1)
+            cols[col] = commit.hash
+        end
+
+        -- Branches merging in end above the commit, so that they visibly join
+        -- the dot rather than the commit below it.
+        if #waiting > 1 then
+            local merged, ends = { unpack(cols) }, {}
+            for i = 2, #waiting do
+                merged[waiting[i]] = false
+                ends[#ends + 1] = waiting[i]
+            end
+            rows[#rows + 1] = { rails = _cells_to_chunks(link_cells(cols, merged, col, ends)) }
+            while #merged > 0 and not merged[#merged] do
+                merged[#merged] = nil
+            end
+            cols = merged
+        end
+
+        local cells = {}
+        for i = 1, #cols do
+            local ch = (i == col and (#commit.parents > 1 and _MERGE_DOT or _DOT))
+                or (cols[i] and "│" or " ")
+            cells[#cells + 1] = { ch = ch, col = i }
+            cells[#cells + 1] = { ch = " ", col = i }
+        end
+        commit.rails = _cells_to_chunks(cells)
+        rows[#rows + 1] = commit
+
+        -- Advance the rails: the first parent inherits this column, and any
+        -- further parent takes a column of its own to the right of it.
+        local next_cols = { unpack(cols) }
+        next_cols[col] = commit.parents[1] or false
+        local ends = {}
+        for i = 2, #commit.parents do
+            local parent = commit.parents[i]
+            local at
+            for j = 1, #next_cols do
+                if next_cols[j] == parent then at = j break end
+            end
+            if not at then
+                at = _free_col(next_cols, col + 1)
+                next_cols[at] = parent
+            end
+            if at ~= col then ends[#ends + 1] = at end
+        end
+        if #ends > 0 then
+            rows[#rows + 1] = { rails = _cells_to_chunks(link_cells(cols, next_cols, col, ends)) }
+        end
+
+        -- Drop columns that fell off the right so the graph re-narrows.
+        while #next_cols > 0 and not next_cols[#next_cols] do
+            next_cols[#next_cols] = nil
+        end
+        cols = next_cols
+    end
+
+    -- Pad every prefix out to the widest one, so the commit text lines up in a
+    -- single column no matter how many rails a row happens to carry.
+    local width = 0
+    for _, row in ipairs(rows) do
+        local w = 0
+        for _, chunk in ipairs(row.rails) do w = w + vim.fn.strdisplaywidth(chunk[1]) end
+        width = math.max(width, w)
+    end
+    for _, row in ipairs(rows) do
+        if row.hash then
+            local w = 0
+            for _, chunk in ipairs(row.rails) do w = w + vim.fn.strdisplaywidth(chunk[1]) end
+            row.rails[#row.rails + 1] = { string.rep(" ", width - w), "Normal" }
+        end
+    end
+
+    return rows
+end
+
+--- Parse `git log --pretty=format:%H\t%P\t%ad\t%an\t%D\t%s` output and lay the
+--- commits out as a graph.
 ---@param out string
 ---@return GitTools.LogEntry[]
 local function _parse_graph(out)
-    local entries = {}
+    local commits = {}
     for _, line in ipairs(git.lines(out)) do
-        local rails, hash, parents, date, author, subject =
-            line:match("^([^\t]*)\t(%x+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
+        local hash, parents, date, author, refs, subject =
+            line:match("^(%x+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
         if hash then
-            entries[#entries + 1] = {
-                rails = rails, hash = hash, parents = _split_parents(parents),
-                date = date, author = author, subject = subject,
+            commits[#commits + 1] = {
+                hash = hash, parents = _split_parents(parents),
+                date = date, author = author, refs = refs, subject = subject,
             }
-        else
-            entries[#entries + 1] = { rails = line }
         end
     end
-    return entries
+    return _layout(commits)
 end
 
 --- The leading identifier for a line: the short hash, or (in the stash view)
@@ -116,12 +319,16 @@ end
 ---@param e GitTools.LogEntry
 ---@return [string, string][]
 local function _build_entry(e)
-    return {
+    local chunks = {
         { _id(e), "Comment" },
         { " " .. e.date .. " ", "DiagnosticHint" },
         { e.author .. " ", "Identifier" },
-        { e.subject, "Normal" },
     }
+    if e.refs and e.refs ~= "" then
+        chunks[#chunks + 1] = { "(" .. e.refs .. ") ", "WarningMsg" }
+    end
+    chunks[#chunks + 1] = { e.subject, "Normal" }
+    return chunks
 end
 
 --- The `{text, hl}` chunks making up one buffer line.
@@ -130,8 +337,8 @@ end
 ---@return [string, string][]
 local function _entry_chunks(session, entry)
     local chunks = {}
-    if entry.rails ~= "" then
-        chunks[#chunks + 1] = { entry.rails, "Special" }
+    for _, chunk in ipairs(entry.rails or {}) do
+        chunks[#chunks + 1] = chunk
     end
     if entry.hash then
         if session.flagged == entry.hash then
@@ -338,11 +545,27 @@ function M.log(opts)
     _run_log(opts or {}, { "--pretty=format:%H\t%P\t%ad\t%an\t%s" }, _parse_log)
 end
 
---- Like `M.log`, but with `git log --graph` rail drawing in front of each
---- commit -- mirrors `git log --graph [<rev>] [-- <path>]`.
+--- Like `M.log`, but with the commit tree drawn in front of each commit, plus
+--- each commit's ref decoration -- mirrors `git log --graph --decorate
+--- [<rev>] [-- <path>]`, except that the rails are drawn here rather than by
+--- git, in box-drawing glyphs with one colour per rail.
+---
+--- `--topo-order` and `--parents` are what `--graph` itself turns on. Without
+--- topological order commits come out by date, which interleaves unrelated
+--- branches and leaves the rails running the length of the graph instead of in
+--- compact runs. `--parents` turns on parent rewriting, which matters once
+--- `opts.path` limits the history: `%P` then names the nearest ancestor that
+--- is still in the log rather than the true parent, so the rails still join up
+--- instead of every commit starting a column of its own.
 ---@param opts GitTools.LogOpts?
 function M.graph(opts)
-    _run_log(opts or {}, { "--graph", "--pretty=format:%x09%H%x09%P%x09%ad%x09%an%x09%s" }, _parse_graph)
+    _define_rail_hl()
+    _run_log(opts or {}, {
+        "--topo-order",
+        "--parents",
+        "--decorate=short",
+        "--pretty=format:%H\t%P\t%ad\t%an\t%D\t%s",
+    }, _parse_graph)
 end
 
 --- Run `git stash list` and show the parsed entries -- mirrors `_run_log`,

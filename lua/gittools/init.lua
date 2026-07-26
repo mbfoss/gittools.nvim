@@ -18,8 +18,8 @@ local merge    = require("gittools.merge")
 ---                                             unsaved edits) in a side split
 ---   GitTool log [<rev>] [-- <path>]           browse commit history as an
 ---                                             interactive flat list
----   GitTool graph [<rev>] [-- <path>]         like log, but with `git log
----                                             --graph` rail drawing
+---   GitTool graph [<rev>] [-- <path>]         like log, but with the commit
+---                                             tree drawn alongside it
 ---   GitTool stashlist                         browse `git stash list` the
 ---                                             same way as log
 ---   GitTool blame                             annotate the current buffer in

@@ -9,10 +9,57 @@ under a single `:GitTool` command.
 | `GitTool diffpaths <a> <b>` | diff two files or two directories off disk (no repo needed) |
 | `GitTool diffthis [<rev>]` | diff the current buffer, including unsaved edits |
 | `GitTool log [<rev>] [-- <path>]` | browse commit history as an interactive list |
-| `GitTool graph [<rev>] [-- <path>]` | like `log`, with `git log --graph` rail drawing |
+| `GitTool graph [<rev>] [-- <path>]` | like `log`, with the commit tree drawn alongside it |
 | `GitTool stashlist` | browse `git stash list` the same way as `log` |
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
 | `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
+
+## `GitTool log` and `GitTool graph`
+
+Both open the history in a bottom split, one commit per line, and both take an
+optional revision to start from and an optional path to scope to:
+
+```vim
+:GitTool log                      " history from HEAD
+:GitTool graph v1.2.0             " ...starting at a tag
+:GitTool graph -- lua/gittools    " ...only commits touching a path
+```
+
+In either view `<CR>` diffs the commit under the cursor against its first
+parent (a root commit against the empty tree), `c` flags a commit -- and if
+another one was already flagged, diffs the two straight away -- and `q` closes
+the split. `GitTool stashlist` is the same view over `git stash list`, with each
+entry labelled by the `stash@{N}` selector you would type at `git stash
+apply/pop/drop`.
+
+`graph` adds the commit tree in front of each commit and the ref names after
+the author. The rails are drawn by gittools rather than by `git log --graph`,
+in box-drawing glyphs with rounded corners, and each rail is coloured by the
+column it occupies so two branches side by side stay easy to tell apart:
+
+```
+◆   4bebd0e 2025-06-13 Ren  (HEAD -> main) Merge pull request #40 from feat/toggle
+├─╮
+│ ● e1817e2 2025-06-13 Ren  feat: add ClaudeCodeFocus command
+├─╯
+●   21f984b 2025-06-13 Ren  fix: native terminal window flags
+```
+
+`●` is an ordinary commit and `◆` one with more than one parent. A branch curves
+out below the merge commit that brought it in and curves back into the commit
+where it forked, so a rail spans exactly the commits that are on it.
+
+Commits come out in topological order (what `git log --graph` uses too), which
+keeps a branch's commits in one unbroken run instead of interleaving them with
+whatever else was committed the same week. Scoping to a path turns on git's
+parent rewriting, so the rails still join up across the commits that the path
+filter dropped. Either view loads at most 500 commits; rails whose next commit
+falls past that limit simply run off the bottom.
+
+### Highlights
+
+The rail colours are `GitToolsGraph1` through `GitToolsGraph6`, cycled by
+column. They link to sensible defaults and can be overridden by a colorscheme.
 
 ## `GitTool diffpaths`
 
