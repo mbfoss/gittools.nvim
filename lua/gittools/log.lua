@@ -123,14 +123,6 @@ local function _box(up, down, left, right)
     return _BOX[key] or " "
 end
 
--- Commit markers, as Nerd Font glyphs (Codicon range). Both are drawn on a
--- 500-unit box centred on x=300 -- the same axis as the box-drawing rails
--- above -- so they land dead centre on their rail and stay inside one cell.
--- `cod-git_commit` carries a vertical stroke through the circle, which
--- continues the rail into the commit's own cell instead of leaving the gap a
--- bare "●" does; the solid `cod-circle_filled` then reads as the odd one out
--- for merges. Requires a Nerd Font; without one these render as tofu, in which
--- case fall back to "●" and "◆".
 local _DOT       = ""  -- U+EAFC cod-git_commit    -- ordinary commit
 local _MERGE_DOT = ""  -- U+EA71 cod-circle_filled -- more than one parent
 
