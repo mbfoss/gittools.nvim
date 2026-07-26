@@ -123,8 +123,16 @@ local function _box(up, down, left, right)
     return _BOX[key] or " "
 end
 
-local _DOT       = "●"  -- ordinary commit
-local _MERGE_DOT = "◆"  -- commit with more than one parent
+-- Commit markers, as Nerd Font glyphs (Codicon range). Both are drawn on a
+-- 500-unit box centred on x=300 -- the same axis as the box-drawing rails
+-- above -- so they land dead centre on their rail and stay inside one cell.
+-- `cod-git_commit` carries a vertical stroke through the circle, which
+-- continues the rail into the commit's own cell instead of leaving the gap a
+-- bare "●" does; the solid `cod-circle_filled` then reads as the odd one out
+-- for merges. Requires a Nerd Font; without one these render as tofu, in which
+-- case fall back to "●" and "◆".
+local _DOT       = ""  -- U+EAFC cod-git_commit    -- ordinary commit
+local _MERGE_DOT = ""  -- U+EA71 cod-circle_filled -- more than one parent
 
 --- Turn per-cell `{char, rail column}` pairs into `{text, highlight}` chunks,
 --- runs of the same colour merged into one chunk.
@@ -455,9 +463,12 @@ local function _show(session)
     -- A new split inherits window-local options (scrollbind, cursorbind, ...)
     -- from the window it split off of; reset them so the log split can't end
     -- up scroll-linked to the buffer the user opened it from (e.g. a leftover
-    -- `:GitTool blame` sidebar with scrollbind still on).
+    -- `:GitTool blame` sidebar with scrollbind still on). `spell` goes the same
+    -- way: inherited from a prose buffer it would underline hashes, author
+    -- names and half the subject lines.
     vim.wo[win].scrollbind = false
     vim.wo[win].cursorbind = false
+    vim.wo[win].spell = false
 
     session.win = win
     _session = session
