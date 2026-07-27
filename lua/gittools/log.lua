@@ -123,8 +123,8 @@ local function _box(up, down, left, right)
     return _BOX[key] or " "
 end
 
-local _DOT       = ""  -- U+EAFC cod-git_commit    -- ordinary commit
-local _MERGE_DOT = ""  -- U+EA71 cod-circle_filled -- more than one parent
+local _DOT       = "●"  -- ordinary commit
+local _MERGE_DOT = "◆"  -- commit with more than one parent
 
 --- Turn per-cell `{char, rail column}` pairs into `{text, highlight}` chunks,
 --- runs of the same colour merged into one chunk.
@@ -461,6 +461,7 @@ local function _show(session)
     vim.wo[win].scrollbind = false
     vim.wo[win].cursorbind = false
     vim.wo[win].spell = false
+    vim.wo[win].wrap = false
 
     session.win = win
     _session = session
