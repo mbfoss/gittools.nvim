@@ -194,10 +194,14 @@ local function _layout(commits)
         local cells = {}
         for i = 1, math.max(#before, #after) do
             local span = i >= lo and i <= hi
+            local up, down = before[i] and true or false, after[i] and true or false
             cells[#cells + 1] = {
-                ch  = _box(before[i] and true or false, after[i] and true or false,
-                    span and i > lo, span and i < hi),
-                col = i,
+                ch  = _box(up, down, span and i > lo, span and i < hi),
+                -- A column the run only crosses -- nothing above it and nothing
+                -- below it -- carries no rail of its own, so it takes the
+                -- anchor's colour like the rest of the run; colouring it by its
+                -- own column would break the line into two colours mid-way.
+                col = (span and not up and not down) and anchor or i,
             }
             -- The gap after the column: part of the horizontal run (and so the
             -- anchor's colour) while it is still inside it.
