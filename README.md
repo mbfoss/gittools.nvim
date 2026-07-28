@@ -14,9 +14,17 @@ under a single `:GitTool` command.
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
 | `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
 
+The views that want room -- `diff`, `diffpaths`, `log`, `graph`, `stashlist` --
+open in a tab of their own rather than carving up the windows you already have.
+The current tab is reused only when it is a single window holding an empty,
+unnamed buffer, i.e. an editor you haven't used yet. Closing such a view closes
+the tab with it, putting you back exactly where you launched it from.
+`diffthis`, `blame` and `merge` are about the buffer you're in, so they stay in
+the current tab.
+
 ## `GitTool log` and `GitTool graph`
 
-Both open the history in a bottom split, one commit per line, and both take an
+Both open the history in a tab of its own, one commit per line, and both take an
 optional revision to start from and an optional path to scope to:
 
 ```vim
@@ -48,9 +56,12 @@ recognise comes back as git's own error.
 In either view `<CR>` diffs the commit under the cursor against its first
 parent (a root commit against the empty tree), `c` flags a commit -- and if
 another one was already flagged, diffs the two straight away -- and `q` closes
-the split. `GitTool stashlist` is the same view over `git stash list`, with each
+the view. `GitTool stashlist` is the same view over `git stash list`, with each
 entry labelled by the `stash@{N}` selector you would type at `git stash
 apply/pop/drop`.
+
+The history stays open behind the diffs it launches: the diff gets a tab of its
+own, so `q` there lands you back on the same commit, ready to open the next one.
 
 `graph` adds the commit tree in front of each commit and the ref names after
 the author. The rails are drawn by gittools rather than by `git log --graph`,

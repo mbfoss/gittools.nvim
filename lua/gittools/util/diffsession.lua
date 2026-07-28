@@ -48,13 +48,16 @@ local ui         = require("gittools.util.ui")
 ---@field label  string                   display label (rename-aware)
 ---@field data   GitTools.EntryData        how to fetch each side's content
 
---- One diff session, living in a vertical split of the window it was launched
---- from. It owns its two split windows, the generated buffers, and a custom
---- list buffer (in a bottom split) whose cursor drives which file is diffed.
---- On teardown it collapses back to a single window so the original layout is
---- restored.
+--- One diff session, living in a tab of its own (the launching tab is reused
+--- only when it holds nothing worth keeping). It owns its two split windows,
+--- the generated buffers, and a custom list buffer (in a bottom split) whose
+--- cursor drives which file is diffed. On teardown it closes the tab it opened,
+--- or -- when it reused a tab -- collapses back to a single window there, so
+--- the layout it started from is restored either way.
 ---@class GitTools.DiffSession
 ---@field group      integer   augroup id for this session's autocmds
+---@field owns_tab   boolean   whether the session opened the tab it lives in,
+---                            and so takes it down with it on teardown
 ---@field left_win   integer?  window for the left (base/source) side
 ---@field right_win  integer?  window for the right (target/live) side
 ---@field list_buf   integer?  scratch buffer listing the changed files
@@ -220,6 +223,16 @@ local function _close_session(session)
     local left_valid  = session.left_win and vim.api.nvim_win_is_valid(session.left_win)
     local right_valid = session.right_win and vim.api.nvim_win_is_valid(session.right_win)
     local survivor    = (right_valid and session.right_win) or (left_valid and session.left_win) or nil
+
+    -- A session that opened its own tab takes it down with it: nothing there
+    -- predates the diff, so keeping a window alive would only leave an empty
+    -- tab behind. Closing our last window in it drops the tab and returns the
+    -- user to the tab they launched from -- the log, typically. Skipped when
+    -- ours is the only tab left (Neovim won't close that one), where the
+    -- collapse-to-one-window path still applies.
+    if session.owns_tab and #vim.api.nvim_list_tabpages() > 1 then
+        survivor = nil
+    end
 
     -- Turn off diff mode on every split window up front, before any of them is
     -- closed. `diffthis` sets window-local flags (diff, scrollbind, cursorbind,
@@ -458,12 +471,14 @@ for _, map in ipairs({
     end, { desc = "gittools: " .. map.desc })
 end
 
---- Split the current window into the side-by-side diff layout, reusing the
---- launching window as the left side and a vertical split as the right side.
---- Closing either split window (or, once registered, the file list) tears the
---- session down and collapses back to a single window.
+--- Build the side-by-side diff layout in a tab of its own -- a new one unless
+--- the current tab is an unused editor (see `ui.claim_tab`), so the session
+--- never carves up the windows the user already has open. Its window becomes
+--- the left side, a vertical split the right. Closing either split window (or,
+--- once registered, the file list) tears the session down.
 ---@param session GitTools.DiffSession
 local function _build_layout(session)
+    session.owns_tab = ui.claim_tab()
     session.left_win = vim.api.nvim_get_current_win()
     vim.cmd("rightbelow vsplit")
     session.right_win = vim.api.nvim_get_current_win()
@@ -583,6 +598,7 @@ function M.open(items)
     ---@type GitTools.DiffSession
     local session = {
         group      = vim.api.nvim_create_augroup("gittools.diff." .. _next_id, { clear = true }),
+        owns_tab   = false,
         left_win   = nil,
         right_win  = nil,
         list_buf   = nil,

@@ -8,15 +8,17 @@ local difftool = require("gittools.diff")
 local ui   = require("gittools.util.ui")
 
 --- `:GitTool log [<opt>...] [<rev>] [-- <path>]` -- commit history as a flat
---- list in a bottom split. `:GitTool graph [<opt>...] [<rev>] [-- <path>]` --
+--- list in a tab of its own. `:GitTool graph [<opt>...] [<rev>] [-- <path>]` --
 --- the same, but with a commit tree drawn in front of each commit in
 --- box-drawing glyphs, one colour per rail. `<opt>` is any `git log` option
 --- that leaves one line per commit (`--all`, `--no-merges`, `-n 50`, ...),
---- handed to git as given. `:GitTool stash_log` -- the stash list (`git stash list`) in the
---- same kind of split, each entry labeled with its `stash@{N}` selector
---- instead of a hash. In all three views `<CR>` diffs the commit under the
---- cursor against its first parent; `c` flags a commit, and if another commit
---- was already flagged, immediately diffs the two (via `gittools.diff`).
+--- handed to git as given. `:GitTool stash_log` -- the stash list (`git stash
+--- list`) in the same kind of view, each entry labeled with its `stash@{N}`
+--- selector instead of a hash. In all three views `<CR>` diffs the commit under
+--- the cursor against its first parent; `c` flags a commit, and if another
+--- commit was already flagged, immediately diffs the two (via `gittools.diff`).
+--- The diff opens in its own tab and the list stays put behind it, so `q` on
+--- the diff comes back to the same place in the history.
 
 local _LIMIT      = 500
 local _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -45,7 +47,6 @@ end
 ---@field root    string
 ---@field buf     integer?
 ---@field win     integer?
----@field origin  integer?  window the log was launched from; the diff reuses it
 ---@field flagged string?
 ---@field entries GitTools.LogEntry[]           by buffer line
 ---@field line_of table<string, integer>        hash -> buffer line
@@ -53,13 +54,12 @@ end
 local _session = nil
 
 --- Close the active log/graph session's window, if any. Safe to call anytime.
+--- When the log has a tab to itself, that closes the tab with it.
 local function _end_log()
     if not _session then return end
     local win = _session.win
     _session = nil
-    if win and vim.api.nvim_win_is_valid(win) then
-        pcall(vim.api.nvim_win_close, win, false)
-    end
+    ui.close_win(win)
 end
 
 ---@param parents string  space-separated hashes from `%P`
@@ -406,27 +406,14 @@ local function _entry_at_cursor(session)
     return (entry and entry.hash) and entry or nil
 end
 
---- Close the log split and return focus to the window it was launched from, so
---- a diff opened next reuses that window instead of splitting new panes on top
---- of the (bottom) log split. Returns the root to diff in.
----@param session GitTools.LogSession
----@return string root
-local function _handoff_to_diff(session)
-    local root, origin = session.root, session.origin
-    _end_log()
-    if origin and vim.api.nvim_win_is_valid(origin) then
-        vim.api.nvim_set_current_win(origin)
-    end
-    return root
-end
-
 --- Diff `entry` against its first parent (or the empty tree, for a root
---- commit) -- i.e. show what that commit itself changed. Closes the log split
---- and reuses the window it was launched from for the diff.
+--- commit) -- i.e. show what that commit itself changed. The log stays open:
+--- the diff takes a tab of its own, so closing it drops the user straight back
+--- here to pick the next commit.
 ---@param session GitTools.LogSession
 ---@param entry   GitTools.LogEntry
 local function _diff_against_parent(session, entry)
-    local root = _handoff_to_diff(session)
+    local root = session.root
     local parent = entry.parents[1]
     if parent and git.verify_rev(root, parent) then
         difftool.diff({ revs = { parent, entry.hash }, root = root })
@@ -435,13 +422,12 @@ local function _diff_against_parent(session, entry)
     end
 end
 
---- Show `session.entries` in a scratch buffer in a bottom split and wire up
---- the `gd` / `c` / `q` maps.
+--- Show `session.entries` in a scratch buffer and wire up the `<CR>` / `c` /
+--- `q` maps. The view takes a whole tab -- a new one unless the current tab is
+--- an unused editor (see `ui.claim_tab`) -- rather than a split, so it can stay
+--- open alongside the diffs launched from it without competing for room.
 ---@param session GitTools.LogSession
 local function _show(session)
-    -- Remember the window the log is launched from (before the split below) so
-    -- diffs can reuse it rather than pile new splits onto the log window.
-    session.origin = vim.api.nvim_get_current_win()
     _end_log()
 
     local buf = ui.create_scratch_buffer(false, {
@@ -454,13 +440,12 @@ local function _show(session)
     session.buf = buf
     _render(session)
 
-    vim.cmd("botright new")
+    ui.claim_tab()
     local win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, buf)
-    vim.api.nvim_win_set_height(win, math.min(20, #session.entries))
-    -- A new split inherits window-local options (scrollbind, cursorbind, ...)
-    -- from the window it split off of; reset them so the log split can't end
-    -- up scroll-linked to the buffer the user opened it from (e.g. a leftover
+    -- A window can carry window-local options (scrollbind, cursorbind, ...) from
+    -- whatever it showed before; reset them so the log can't end up
+    -- scroll-linked to the buffer the user opened it from (e.g. a leftover
     -- `:GitTool blame` sidebar with scrollbind still on). `spell` goes the same
     -- way: inherited from a prose buffer it would underline hashes, author
     -- names and half the subject lines.
@@ -487,10 +472,10 @@ local function _show(session)
         if old then _render(session, session.line_of[old]) end
         if session.flagged then _render(session, session.line_of[session.flagged]) end
         -- A different commit was already flagged: diff it against the one
-        -- just flagged.
+        -- just flagged. The log stays open (in its own tab) with the new flag
+        -- set, so the next `c` picks up from there.
         if old and old ~= entry.hash then
-            local root = _handoff_to_diff(session)
-            difftool.diff({ revs = { old, entry.hash }, root = root })
+            difftool.diff({ revs = { old, entry.hash }, root = session.root })
         end
     end, { buffer = buf, desc = "Flag commit, diffing against the previous flag if any" })
 
@@ -606,7 +591,7 @@ local function _run_log(opts, extra_args, parse, reverse)
     _show({ root = root, flagged = nil, entries = entries, line_of = line_of })
 end
 
---- List commit history in an interactive bottom split, starting from
+--- List commit history in an interactive tab of its own, starting from
 --- `opts.rev` (default HEAD) and optionally scoped to `opts.path` -- mirrors
 --- `git log [<opts.args>...] [<rev>] [-- <path>]`.
 ---@param opts GitTools.LogOpts?
@@ -669,7 +654,7 @@ local function _run_stash_log()
     _show({ root = root, flagged = nil, entries = entries, line_of = line_of })
 end
 
---- List stashes in an interactive bottom split, same interaction as `M.log`
+--- List stashes in an interactive tab of its own, same interaction as `M.log`
 --- (flag/diff/close) -- mirrors `git stash list`. Diffing a stash
 --- (with nothing flagged) compares it against its first parent, i.e. the
 --- commit that was checked out when it was stashed -- the tracked changes it

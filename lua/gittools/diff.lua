@@ -154,15 +154,16 @@ end
 ---@field revs   string[]? zero, one, or two revisions (see git-diff semantics)
 ---@field root   string?   repo root to diff in (default: the root containing the editor's cwd)
 
---- Diff the requested revisions/index/working-tree sides by splitting the
---- current window, driving a custom file list (in a bottom split) that selects
---- the file shown in a side-by-side native diff. It opens with the cursor in
---- the right (target) pane, showing the first changed file; `]f` / `[f` step
---- through the rest from there. `<C-w>j` drops into the list, where `<CR>`
---- shows the file under the cursor (staying in the list, so the user can flip
---- through files) and `q` closes the session. Closing either split window or
---- the file list collapses back to a single window, restoring the original
---- layout.
+--- Diff the requested revisions/index/working-tree sides in a tab of its own
+--- (the current tab is reused only when it's an unused editor), driving a
+--- custom file list (in a bottom split) that selects the file shown in a
+--- side-by-side native diff. It opens with the cursor in the right (target)
+--- pane, showing the first changed file; `]f` / `[f` step through the rest from
+--- there. `<C-w>j` drops into the list, where `<CR>` shows the file under the
+--- cursor (staying in the list, so the user can flip through files) and `q`
+--- closes the session. Closing either split window or the file list ends the
+--- session and, with it, the tab it opened -- so the windows the diff was
+--- launched from are left exactly as they were.
 ---@param opts GitTools.DiffOpts?
 function M.diff(opts)
     opts = opts or {}
