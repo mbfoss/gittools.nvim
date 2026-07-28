@@ -7,10 +7,12 @@ local git      = require("gittools.git")
 local difftool = require("gittools.diff")
 local ui   = require("gittools.util.ui")
 
---- `:GitTool log [<rev>] [-- <path>]` -- commit history as a flat list in a
---- bottom split. `:GitTool graph [<rev>] [-- <path>]` -- the same, but with a
---- commit tree drawn in front of each commit in box-drawing glyphs, one colour
---- per rail. `:GitTool stash_log` -- the stash list (`git stash list`) in the
+--- `:GitTool log [<opt>...] [<rev>] [-- <path>]` -- commit history as a flat
+--- list in a bottom split. `:GitTool graph [<opt>...] [<rev>] [-- <path>]` --
+--- the same, but with a commit tree drawn in front of each commit in
+--- box-drawing glyphs, one colour per rail. `<opt>` is any `git log` option
+--- that leaves one line per commit (`--all`, `--no-merges`, `-n 50`, ...),
+--- handed to git as given. `:GitTool stash_log` -- the stash list (`git stash list`) in the
 --- same kind of split, each entry labeled with its `stash@{N}` selector
 --- instead of a hash. In all three views `<CR>` diffs the commit under the
 --- cursor against its first parent; `c` flags a commit, and if another commit
@@ -491,23 +493,69 @@ local function _show(session)
     vim.keymap.set("n", "q", _end_log, { buffer = buf, desc = "Close log" })
 end
 
----@class GitTools.LogOpts
----@field rev  string?  start the log from this revision instead of HEAD
----@field path string?  scope the log to commits touching this path
+--- Options that would break parsing (they replace or extend the `--pretty`
+--- format this module relies on) or the layout, keyed by the flag as written;
+--- `=`-joined values are stripped before the lookup. `--reverse` is rejected
+--- only in the graph view: the layout walks children before parents, and in
+--- reverse order every commit would open a rail of its own.
+local _REJECTED = {
+    ["--pretty"] = true, ["--format"] = true, ["--oneline"] = true,
+    ["--graph"] = true, ["-p"] = true, ["-u"] = true, ["--patch"] = true,
+    ["--stat"] = true, ["--shortstat"] = true, ["--numstat"] = true,
+    ["--raw"] = true, ["--name-only"] = true, ["--name-status"] = true,
+    ["-z"] = true, ["--null"] = true,
+}
 
---- Validate `opts`, run `git log <extra_args>... [<rev>] [-- <path>]`, and
---- show the parsed entries.
+--- The first option in `args` this module can't render, or nil if all of them
+--- are fine to hand to git.
+---@param args    string[]
+---@param reverse boolean  whether `--reverse` is usable in this view
+---@return string?
+local function _rejected_opt(args, reverse)
+    for _, a in ipairs(args) do
+        local flag = a:match("^([^=]+)=") or a
+        if _REJECTED[flag] or (not reverse and flag == "--reverse") then
+            return a
+        end
+    end
+    return nil
+end
+
+--- Whether `rev` is a plain revision that can be checked up front, as opposed
+--- to a range (`a..b`, `a...b`) or an exclusion (`^a`), which `git rev-parse
+--- --verify` rejects and which git itself will report on instead.
+---@param rev string
+---@return boolean
+local function _is_plain_rev(rev)
+    return not rev:find("%.%.", 1, false) and not vim.startswith(rev, "^")
+end
+
+---@class GitTools.LogOpts
+---@field rev  string?    start the log from this revision instead of HEAD
+---@field path string?    scope the log to commits touching this path
+---@field args string[]?  extra `git log` options, passed through verbatim
+---                       (e.g. `--all`, `--no-merges`, `--author=...`)
+
+--- Validate `opts`, run `git log <extra_args>... <opts.args>... [<rev>]
+--- [-- <path>]`, and show the parsed entries.
 ---@param opts       GitTools.LogOpts
 ---@param extra_args string[]
 ---@param parse      fun(out: string): GitTools.LogEntry[]
-local function _run_log(opts, extra_args, parse)
+---@param reverse    boolean?  whether the view can render `--reverse` output
+local function _run_log(opts, extra_args, parse, reverse)
     local root = git.root()
     if not root then
         _notify("Not inside a git repository", vim.log.levels.WARN)
         return
     end
 
-    if opts.rev and not git.verify_rev(root, opts.rev) then
+    local bad = _rejected_opt(opts.args or {}, reverse or false)
+    if bad then
+        _notify("Option not supported here: " .. bad, vim.log.levels.ERROR)
+        return
+    end
+
+    if opts.rev and _is_plain_rev(opts.rev) and not git.verify_rev(root, opts.rev) then
         _notify("Unknown revision: " .. opts.rev, vim.log.levels.ERROR)
         return
     end
@@ -522,15 +570,25 @@ local function _run_log(opts, extra_args, parse)
         end
     end
 
+    -- The user's options come last, so that a `-n`/`--max-count` of their own
+    -- overrides the default cap rather than being overridden by it (git takes
+    -- the last occurrence).
     local args = { "log", "--date=short", "-n", tostring(_LIMIT) }
     vim.list_extend(args, extra_args)
+    vim.list_extend(args, opts.args or {})
     if opts.rev then args[#args + 1] = opts.rev end
     if rel then
         args[#args + 1] = "--"
         args[#args + 1] = rel
     end
 
-    local entries = parse((git.run(root, args)) or "")
+    local out, err = git.run(root, args)
+    if not out then
+        _notify(err ~= "" and err or "git log failed", vim.log.levels.ERROR)
+        return
+    end
+
+    local entries = parse(out)
     if #entries == 0 then
         _notify("No commits found")
         return
@@ -546,16 +604,19 @@ end
 
 --- List commit history in an interactive bottom split, starting from
 --- `opts.rev` (default HEAD) and optionally scoped to `opts.path` -- mirrors
---- `git log [<rev>] [-- <path>]`.
+--- `git log [<opts.args>...] [<rev>] [-- <path>]`.
 ---@param opts GitTools.LogOpts?
 function M.log(opts)
-    _run_log(opts or {}, { "--pretty=format:%H\t%P\t%ad\t%an\t%s" }, _parse_log)
+    _run_log(opts or {}, { "--pretty=format:%H\t%P\t%ad\t%an\t%s" }, _parse_log, true)
 end
 
 --- Like `M.log`, but with the commit tree drawn in front of each commit, plus
 --- each commit's ref decoration -- mirrors `git log --graph --decorate
---- [<rev>] [-- <path>]`, except that the rails are drawn here rather than by
---- git, in box-drawing glyphs with one colour per rail.
+--- [<opts.args>...] [<rev>] [-- <path>]`, except that the rails are drawn here
+--- rather than by git, in box-drawing glyphs with one colour per rail. With
+--- `opts.args` naming several tips (`--all`, `--branches`, ...) the layout
+--- gives each tip a rail of its own, exactly as it does for the branches that
+--- merge into a single one.
 ---
 --- `--topo-order` and `--parents` are what `--graph` itself turns on. Without
 --- topological order commits come out by date, which interleaves unrelated
@@ -572,7 +633,7 @@ function M.graph(opts)
         "--parents",
         "--decorate=short",
         "--pretty=format:%H\t%P\t%ad\t%an\t%D\t%s",
-    }, _parse_graph)
+    }, _parse_graph, false)
 end
 
 --- Run `git stash list` and show the parsed entries -- mirrors `_run_log`,

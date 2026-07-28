@@ -8,8 +8,8 @@ under a single `:GitTool` command.
 | `GitTool diff [--staged] [<rev> [<rev>]]` | directory diff: file list + side-by-side layout |
 | `GitTool diffpaths <a> <b>` | diff two files or two directories off disk (no repo needed) |
 | `GitTool diffthis [<rev>]` | diff the current buffer, including unsaved edits |
-| `GitTool log [<rev>] [-- <path>]` | browse commit history as an interactive list |
-| `GitTool graph [<rev>] [-- <path>]` | like `log`, with the commit tree drawn alongside it |
+| `GitTool log [<opt>...] [<rev>] [-- <path>]` | browse commit history as an interactive list |
+| `GitTool graph [<opt>...] [<rev>] [-- <path>]` | like `log`, with the commit tree drawn alongside it |
 | `GitTool stashlist` | browse `git stash list` the same way as `log` |
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
 | `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
@@ -24,6 +24,26 @@ optional revision to start from and an optional path to scope to:
 :GitTool graph v1.2.0             " ...starting at a tag
 :GitTool graph -- lua/gittools    " ...only commits touching a path
 ```
+
+Anything else starting with `-` is a `git log` option, handed to git as
+written, so the usual revision selection and filtering works here too:
+
+```vim
+:GitTool graph --all              " every branch, tag and remote, not just HEAD
+:GitTool graph --branches --remotes --no-merges
+:GitTool graph --all -n 2000      " raise the 500-commit default cap
+:GitTool log --author=Ren --since=2.weeks main..dev -- lua/
+```
+
+Completion offers the common ones (`--all`, `--branches`, `--remotes`,
+`--tags`, `--first-parent`, `--merges`, `--no-merges`, `--author=`, `--grep=`,
+`--since=`, `--until=`, `-n`, ...) alongside the ref names. Options that
+replace the one-line-per-commit output -- `--pretty`, `--format`, `--oneline`,
+`--stat`, `--patch`, `--name-status`, `-z` and friends -- are rejected with a
+message rather than silently producing an unreadable buffer, as is `--graph`
+itself (gittools draws the rails). `--reverse` works in `log`; `graph` rejects
+it, since the layout needs children before parents. Anything git doesn't
+recognise comes back as git's own error.
 
 In either view `<CR>` diffs the commit under the cursor against its first
 parent (a root commit against the empty tree), `c` flags a commit -- and if
@@ -53,8 +73,9 @@ Commits come out in topological order (what `git log --graph` uses too), which
 keeps a branch's commits in one unbroken run instead of interleaving them with
 whatever else was committed the same week. Scoping to a path turns on git's
 parent rewriting, so the rails still join up across the commits that the path
-filter dropped. Either view loads at most 500 commits; rails whose next commit
-falls past that limit simply run off the bottom.
+filter dropped. Either view loads at most 500 commits unless you pass an `-n`/`--max-count` of
+your own; rails whose next commit falls past that limit simply run off the
+bottom.
 
 ### Highlights
 

@@ -19,10 +19,13 @@ local merge    = require("gittools.merge")
 ---                                             off disk (no repository needed)
 ---   GitTool diffthis [<rev>]                  diff the current buffer (incl.
 ---                                             unsaved edits) in a side split
----   GitTool log [<rev>] [-- <path>]           browse commit history as an
----                                             interactive flat list
----   GitTool graph [<rev>] [-- <path>]         like log, but with the commit
----                                             tree drawn alongside it
+---   GitTool log [<opt>...] [<rev>]            browse commit history as an
+---               [-- <path>]                   interactive flat list
+---   GitTool graph [<opt>...] [<rev>]          like log, but with the commit
+---                 [-- <path>]                 tree drawn alongside it
+---                                             (<opt> is any `git log` option
+---                                             that keeps one line per commit,
+---                                             e.g. --all, --no-merges, -n 50)
 ---   GitTool stashlist                         browse `git stash list` the
 ---                                             same way as log
 ---   GitTool blame                             annotate the current buffer in
@@ -76,6 +79,51 @@ local function _split_sep(args)
     return args, {}
 end
 
+--- `git log` options that take their value as a separate argument when it is
+--- not `=`-joined (`-n 20`, `--author Ada`), so that the value isn't mistaken
+--- for a revision. Short options may also carry the value glued on (`-n20`),
+--- which needs no entry here.
+local _LOG_VALUE_OPTS = {
+    ["-n"] = true, ["--max-count"] = true, ["--skip"] = true,
+    ["--since"] = true, ["--after"] = true, ["--until"] = true,
+    ["--before"] = true, ["--author"] = true, ["--committer"] = true,
+    ["--grep"] = true, ["-S"] = true, ["-G"] = true, ["-L"] = true,
+}
+
+--- Options offered as completions for `log`/`graph` -- the `git log` flags
+--- worth reaching for in a history browser. Those ending in `=` take a value.
+local _LOG_OPTS = {
+    "--all", "--branches", "--remotes", "--tags", "--first-parent",
+    "--merges", "--no-merges", "--reflog", "--ancestry-path",
+    "--author=", "--committer=", "--grep=", "--since=", "--until=",
+    "--max-count=", "--skip=", "-n",
+}
+
+--- Split `args` into `git log` options and positional revisions, mirroring
+--- git's own command line: anything starting with `-` is an option, and the
+--- argument after a value-taking option belongs to it.
+---@param args string[]
+---@return string[] opts
+---@return string[] revs
+local function _split_opts(args)
+    local opts, revs = {}, {}
+    local i = 1
+    while i <= #args do
+        local a = args[i]
+        if a:sub(1, 1) == "-" and a ~= "-" then
+            opts[#opts + 1] = a
+            if _LOG_VALUE_OPTS[a] and args[i + 1] then
+                opts[#opts + 1] = args[i + 1]
+                i = i + 1
+            end
+        else
+            revs[#revs + 1] = a
+        end
+        i = i + 1
+    end
+    return opts, revs
+end
+
 --- Register `:GitTool`. Auto-called by the central module loader.
 function M.setup()
     local group = vim.api.nvim_create_augroup(_AUGROUP, { clear = true })
@@ -108,7 +156,8 @@ function M.setup()
             end
             diffthis.diffthis({ rev = revs[1] })
         elseif sub == "log" or sub == "graph" then
-            local revs, paths = _split_sep({ unpack(args, 2) })
+            local before, paths = _split_sep({ unpack(args, 2) })
+            local log_opts, revs = _split_opts(before)
             if #revs > 1 then
                 _notify("GitTool " .. sub .. " takes at most one revision", vim.log.levels.ERROR)
                 return
@@ -118,7 +167,7 @@ function M.setup()
                 return
             end
             local fn = sub == "log" and logtool.log or logtool.graph
-            fn({ rev = revs[1], path = paths[1] })
+            fn({ rev = revs[1], path = paths[1], args = log_opts })
         elseif sub == "stashlist" then
             if args[2] then
                 _notify("GitTool stashlist takes no arguments", vim.log.levels.ERROR)
@@ -176,6 +225,8 @@ function M.setup()
                     return vim.fn.getcompletion(arg_lead, "file")
                 end
                 local out = { "--" }
+                vim.list_extend(out, _LOG_OPTS)
+                if sub == "log" then out[#out + 1] = "--reverse" end
                 vim.list_extend(out, git.refs())
                 return out
             end
