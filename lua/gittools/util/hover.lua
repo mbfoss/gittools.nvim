@@ -39,6 +39,13 @@ function M.show(text, opts)
         max_height = math.floor(vim.o.lines * 0.8),
     })
 
+    -- A new window inherits the window-local options of the one it is opened
+    -- from, so a hover raised over the blame sidebar comes up scroll- and
+    -- cursor-bound to the file next to it: moving the cursor inside the hover
+    -- would drag the buffers underneath along with it.
+    vim.wo[win].scrollbind = false
+    vim.wo[win].cursorbind = false
+
     -- `q` comes with the preview; `<Esc>` is the other key a hover is expected
     -- to answer to. Both only matter once the hover has been focused.
     vim.keymap.set("n", "<Esc>", function()
