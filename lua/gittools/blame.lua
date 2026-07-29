@@ -34,6 +34,7 @@ end
 ---@class GitTools.BlameSession
 ---@field group     integer
 ---@field file_win  integer?
+---@field file_buf  integer
 ---@field blame_win integer?
 ---@field blame_buf integer
 ---@field saved     table<string, any>  file-window options to restore on close
@@ -54,12 +55,37 @@ local function _end_blame()
             vim.wo[s.file_win][opt] = val
         end
     end
+
     if s.blame_win and vim.api.nvim_win_is_valid(s.blame_win) then
-        pcall(vim.api.nvim_win_close, s.blame_win, false)
+        -- The sidebar can be the last window in its tabpage (the file window
+        -- was the one closed), and then it can't be closed. Hand the window
+        -- back to the blamed file and undo the sidebar's look, rather than
+        -- leave the user sitting in a naked annotation column.
+        if not pcall(vim.api.nvim_win_close, s.blame_win, false) then
+            if vim.api.nvim_buf_is_valid(s.file_buf) then
+                vim.api.nvim_win_set_buf(s.blame_win, s.file_buf)
+            end
+            vim.api.nvim_win_call(s.blame_win, function()
+                vim.cmd("setlocal winfixwidth< number< relativenumber< "
+                    .. "signcolumn< foldcolumn< list< winbar< "
+                    .. "scrollbind< cursorbind< wrap< foldenable<")
+            end)
+        end
     end
     if vim.api.nvim_buf_is_valid(s.blame_buf) then
         pcall(vim.api.nvim_buf_delete, s.blame_buf, { force = true })
     end
+end
+
+--- Defer teardown to the next event loop tick: autocmds fire mid-close and
+--- mid-edit, where closing a window trips Neovim's own bookkeeping (E445), and
+--- `BufWinLeave` runs *before* the buffer actually leaves the window, so the
+--- checks in `_end_soon` need the settled layout.
+---@param session GitTools.BlameSession
+local function _end_soon(session)
+    vim.schedule(function()
+        if _session == session then _end_blame() end
+    end)
 end
 
 --- Parse `git blame --line-porcelain` output into one entry per final line.
@@ -270,6 +296,7 @@ function M.blame()
     local session = {
         group     = group,
         file_win  = file_win,
+        file_buf  = buf,
         blame_win = blame_win,
         blame_buf = blame_buf,
         saved     = {},
@@ -292,15 +319,53 @@ function M.blame()
             callback = function()
                 if win == session.file_win then session.file_win = nil end
                 if win == session.blame_win then session.blame_win = nil end
-                _end_blame()
+                _end_soon(session)
             end,
         })
     end
-    -- Editing the file invalidates line alignment; drop the sidebar.
-    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+
+    -- The blamed buffer leaving its window (`:edit other`, `:bdelete`, a
+    -- `:close` we didn't see) leaves the sidebar annotating something that is
+    -- no longer on screen. Re-check once the layout has settled: the same event
+    -- fires when the buffer is merely dropped from *another* window, and that
+    -- is not our business.
+    vim.api.nvim_create_autocmd("BufWinLeave", {
         group    = group,
         buffer   = buf,
-        callback = _end_blame,
+        callback = function()
+            vim.schedule(function()
+                if _session ~= session then return end
+                local fw = session.file_win
+                if fw and vim.api.nvim_win_is_valid(fw)
+                    and vim.api.nvim_win_get_buf(fw) == session.file_buf then
+                    return
+                end
+                _end_blame()
+            end)
+        end,
+    })
+    -- Wiping the buffer while it is hidden never passes through BufWinLeave.
+    vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+        group    = group,
+        buffer   = buf,
+        callback = function() _end_soon(session) end,
+    })
+    -- Editing or reloading the file invalidates line alignment; drop the
+    -- sidebar. (`:edit!` rewrites the buffer without a TextChanged.)
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufReadPost" }, {
+        group    = group,
+        buffer   = buf,
+        callback = function() _end_soon(session) end,
+    })
+    -- Something else took over the sidebar window (`:edit` from inside it):
+    -- bufhidden=wipe destroys our annotations, so the session is over.
+    vim.api.nvim_create_autocmd({ "BufWinLeave", "BufWipeout" }, {
+        group    = group,
+        buffer   = blame_buf,
+        callback = function()
+            session.blame_win = nil
+            _end_soon(session)
+        end,
     })
 
     vim.api.nvim_create_autocmd("CursorMoved", {
