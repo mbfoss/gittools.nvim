@@ -6,7 +6,7 @@ local unpack   = table.unpack or unpack
 local git      = require("gittools.git")
 local difftool = require("gittools.diff")
 local ui       = require("gittools.util.ui")
-local float    = require("gittools.util.float")
+local hover    = require("gittools.util.hover")
 
 --- `:GitTool log [<opt>...] [<rev>] [-- <path>]` -- commit history as a flat
 --- list in a tab of its own. `:GitTool graph [<opt>...] [<rev>] [-- <path>]` --
@@ -435,7 +435,7 @@ local function _show_details(session, entry)
         _notify(err ~= "" and err or "git show failed", vim.log.levels.ERROR)
         return
     end
-    float.open(out, { title = _id(entry), filetype = "git" })
+    hover.show(out, { title = _id(entry), syntax = "git" })
 end
 
 --- Show `session.entries` in a scratch buffer and wire up the `<CR>` / `c` /

@@ -2,7 +2,7 @@ local M        = {}
 
 local git      = require("gittools.git")
 local difftool = require("gittools.diff")
-local float    = require("gittools.util.float")
+local hover    = require("gittools.util.hover")
 
 --- `:GitTool blame` -- annotate the current buffer with per-line commit info
 --- in a scroll-bound sidebar, fugitive-style. The buffer's *live* contents are
@@ -173,7 +173,7 @@ local function _show_details(root, entry)
         _notify(err ~= "" and err or "git show failed", vim.log.levels.ERROR)
         return
     end
-    float.open(out, { title = entry.hash:sub(1, 7), filetype = "git" })
+    hover.show(out, { title = entry.hash:sub(1, 7), syntax = "git" })
 end
 
 --- Bind scrolling between the file window and the blame sidebar, saving the
