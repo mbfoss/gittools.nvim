@@ -5,7 +5,8 @@ local unpack   = table.unpack or unpack
 
 local git      = require("gittools.git")
 local difftool = require("gittools.diff")
-local ui   = require("gittools.util.ui")
+local ui       = require("gittools.util.ui")
+local float    = require("gittools.util.float")
 
 --- `:GitTool log [<opt>...] [<rev>] [-- <path>]` -- commit history as a flat
 --- list in a tab of its own. `:GitTool graph [<opt>...] [<rev>] [-- <path>]` --
@@ -16,8 +17,9 @@ local ui   = require("gittools.util.ui")
 --- list`) in the same kind of view, each entry labeled with its `stash@{N}`
 --- selector instead of a hash. In all three views `<CR>` diffs the commit under
 --- the cursor against its first parent; `c` flags a commit, and if another
---- commit was already flagged, immediately diffs the two (via `gittools.diff`).
---- The diff opens in its own tab and the list stays put behind it, so `q` on
+--- commit was already flagged, immediately diffs the two (via `gittools.diff`);
+--- `K` shows the commit's details -- header, message and diffstat -- in a
+--- float. The diff opens in its own tab and the list stays put behind it, so `q` on
 --- the diff comes back to the same place in the history.
 
 local _LIMIT      = 500
@@ -422,8 +424,22 @@ local function _diff_against_parent(session, entry)
     end
 end
 
+--- Show the commit under the cursor -- header, message and diffstat -- in a
+--- float over the log, as a quick look at what a one-line entry stands for
+--- without leaving the list.
+---@param session GitTools.LogSession
+---@param entry   GitTools.LogEntry
+local function _show_details(session, entry)
+    local out, err = git.show(session.root, entry.hash)
+    if not out then
+        _notify(err ~= "" and err or "git show failed", vim.log.levels.ERROR)
+        return
+    end
+    float.open(out, { title = _id(entry), filetype = "git" })
+end
+
 --- Show `session.entries` in a scratch buffer and wire up the `<CR>` / `c` /
---- `q` maps. The view takes a whole tab -- a new one unless the current tab is
+--- `K` / `q` maps. The view takes a whole tab -- a new one unless the current tab is
 --- an unused editor (see `ui.claim_tab`) -- rather than a split, so it can stay
 --- open alongside the diffs launched from it without competing for room.
 ---@param session GitTools.LogSession
@@ -479,7 +495,11 @@ local function _show(session)
         end
     end, { buffer = buf, desc = "Flag commit, diffing against the previous flag if any" })
 
-    vim.keymap.set("n", "q", _end_log, { buffer = buf, desc = "Close log" })
+    vim.keymap.set("n", "K", function()
+        local entry = _entry_at_cursor(session)
+        if not entry then return end
+        _show_details(session, entry)
+    end, { buffer = buf, desc = "Show commit details" })
 end
 
 --- Options that would break parsing (they replace or extend the `--pretty`

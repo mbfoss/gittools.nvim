@@ -106,6 +106,21 @@ function M.verify_rev(root, rev)
     return M.run(root, { "rev-parse", "--verify", "--quiet", rev .. "^{tree}" }) ~= nil
 end
 
+--- `git show` for `rev` without the patch: the commit header (hash, author,
+--- date, ref decoration), the full message, and a diffstat of what it changed.
+--- The patch itself is left out -- it is what `<CR>` opens a real diff for, and
+--- a commit touching a few hundred files would bury the message.
+---@param root string
+---@param rev  string
+---@return string? stdout
+---@return string? stderr
+function M.show(root, rev)
+    return M.run(root, {
+        "--no-pager", "show", "--no-color", "--no-patch", "--stat",
+        "--decorate=short", "--date=iso", rev,
+    })
+end
+
 --- Local branch and tag names (plus `HEAD`) offered as revision completions.
 --- Best-effort: empty outside a repository.
 ---@return string[]

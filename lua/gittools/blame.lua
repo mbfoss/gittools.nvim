@@ -2,13 +2,15 @@ local M        = {}
 
 local git      = require("gittools.git")
 local difftool = require("gittools.diff")
+local float    = require("gittools.util.float")
 
 --- `:GitTool blame` -- annotate the current buffer with per-line commit info
 --- in a scroll-bound sidebar, fugitive-style. The buffer's *live* contents are
 --- piped to `git blame --contents -`, so unsaved edits stay line-aligned and
 --- show up as "Not committed". In the sidebar: the commit summary is echoed as
 --- the cursor moves, `<CR>` diffs the commit under the cursor against its
---- parent (via `gittools.diff`), and `q` closes the sidebar.
+--- parent (via `gittools.diff`), `K` shows that commit's details in a float,
+--- and `q` closes the sidebar.
 
 local _EMPTY_TREE   = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 local _MAX_AUTHOR_W = 20
@@ -156,6 +158,24 @@ local function _diff_commit(root, entry)
     end
 end
 
+--- Show the commit that last touched the line under the cursor -- header,
+--- message and diffstat -- in a float over the sidebar, which is more of the
+--- story than the one-line summary echoed on the command line.
+---@param root  string
+---@param entry GitTools.BlameEntry
+local function _show_details(root, entry)
+    if _is_uncommitted(entry) then
+        _notify("Line is not committed yet")
+        return
+    end
+    local out, err = git.show(root, entry.hash)
+    if not out then
+        _notify(err ~= "" and err or "git show failed", vim.log.levels.ERROR)
+        return
+    end
+    float.open(out, { title = entry.hash:sub(1, 7), filetype = "git" })
+end
+
 --- Bind scrolling between the file window and the blame sidebar, saving the
 --- file window's previous option values for restoration on teardown.
 ---@param session GitTools.BlameSession
@@ -295,13 +315,17 @@ function M.blame()
         end,
     })
 
-    vim.keymap.set("n", "q", _end_blame,
-        { buffer = blame_buf, desc = "Close blame sidebar" })
     vim.keymap.set("n", "<CR>", function()
         local lnum = vim.api.nvim_win_get_cursor(0)[1]
         local e = entries[lnum]
         if e then _diff_commit(root, e) end
     end, { buffer = blame_buf, desc = "Diff commit under cursor" })
+
+    vim.keymap.set("n", "K", function()
+        local lnum = vim.api.nvim_win_get_cursor(0)[1]
+        local e = entries[lnum]
+        if e then _show_details(root, e) end
+    end, { buffer = blame_buf, desc = "Show details of commit under cursor" })
 end
 
 return M

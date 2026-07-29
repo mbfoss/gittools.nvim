@@ -565,9 +565,6 @@ local function _open_list(session)
             vim.api.nvim_set_current_win(rw)
         end
     end, { buffer = buf, desc = "Open the diff for the file under the cursor" })
-
-    vim.keymap.set("n", "q", function() _close_session(session) end,
-        { buffer = buf, desc = "Close the diff" })
 end
 
 --- Open a diff session over `items`: build the side-by-side layout, the driving

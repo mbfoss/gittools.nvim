@@ -55,7 +55,8 @@ recognise comes back as git's own error.
 
 In either view `<CR>` diffs the commit under the cursor against its first
 parent (a root commit against the empty tree), `c` flags a commit -- and if
-another one was already flagged, diffs the two straight away -- and `q` closes
+another one was already flagged, diffs the two straight away -- `K` shows the
+commit's details (header, message and diffstat) in a float, and `q` closes
 the view. `GitTool stashlist` is the same view over `git stash list`, with each
 entry labelled by the `stash@{N}` selector you would type at `git stash
 apply/pop/drop`.
