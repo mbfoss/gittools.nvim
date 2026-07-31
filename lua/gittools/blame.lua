@@ -408,9 +408,6 @@ function M.blame()
         local e = entries[lnum]
         if e then _show_details(root, e) end
     end, { buffer = blame_buf, desc = "Show details of commit under cursor" })
-
-    vim.keymap.set("n", "q", function() _end_blame() end,
-        { buffer = blame_buf, desc = "Close the blame sidebar" })
 end
 
 return M
