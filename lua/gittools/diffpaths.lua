@@ -77,8 +77,9 @@ end
 
 --- Diff two filesystem paths that need not lie in any git repository: either
 --- two files, or two directories (compared recursively via `git diff
---- --no-index`). Each differing file becomes a list entry in the same
---- side-by-side layout `:GitTool diff` uses. Both sides are the real files on
+--- --no-index`). Two directories give one list entry per differing file, in the
+--- same side-by-side layout `:GitTool diff` uses; two files open the diff on its
+--- own, with no file list. Both sides are the real files on
 --- disk, so either can be edited and written from inside the diff (Neovim
 --- marks a file it can't write 'readonly' as usual). The two paths must be the
 --- same kind (both files or both directories).
@@ -140,7 +141,9 @@ function M.diffpaths(a, b)
         }
     end
 
-    session.open(items)
+    -- Two files are a single comparison: skip the file list, which would only
+    -- be a one-line split taking up room below the diff.
+    session.open(items, { list = a_dir })
 end
 
 return M

@@ -60,7 +60,8 @@ local ui         = require("gittools.util.ui")
 ---                            and so takes it down with it on teardown
 ---@field left_win   integer?  window for the left (base/source) side
 ---@field right_win  integer?  window for the right (target/live) side
----@field list_buf   integer?  scratch buffer listing the changed files
+---@field list_buf   integer?  scratch buffer listing the changed files; nil for
+---                            a session opened without a list
 ---@field list_win   integer?  bottom split window showing the list buffer
 ---@field entries    GitTools.DiffEntry[]  one per list-buffer line (1-based)
 ---@field buffers    integer[] generated virtual buffers to delete on close
@@ -567,6 +568,12 @@ local function _open_list(session)
     end, { buffer = buf, desc = "Open the diff for the file under the cursor" })
 end
 
+---@class GitTools.DiffOpts
+---@field list boolean? open the driving file list in a bottom split (default
+---                     true). Pass false for a comparison that is inherently a
+---                     single file -- `:GitTool diffpaths a b` on two files --
+---                     where a one-line picker is only a split in the way.
+
 --- Open a diff session over `items`: build the side-by-side layout, the driving
 --- file list, and show the first item up front (so the layout opens on a real
 --- diff rather than empty panes; the user flips through the rest with `<CR>` /
@@ -574,7 +581,9 @@ end
 --- caller's early returns, so an invalid or empty request leaves the current
 --- session intact. Callers must pass a non-empty list.
 ---@param items GitTools.DiffItem[]
-function M.open(items)
+---@param opts GitTools.DiffOpts?
+function M.open(items, opts)
+    local show_list = not (opts and opts.list == false)
     ---@type GitTools.DiffEntry[]
     local entries = {}
     for _, item in ipairs(items) do
@@ -610,13 +619,18 @@ function M.open(items)
     _session = session
 
     _build_layout(session)
-    _open_list(session)
 
-    -- Show the first entry's diff up front. The shown_line guard makes a later
-    -- <CR> on line 1 a no-op.
-    vim.api.nvim_win_set_cursor(session.list_win, { 1, 0 })
-    local entry, lnum = _entry_at_cursor(session)
-    if entry and lnum then _setup_diff(session, entry, lnum) end
+    -- Show the first entry's diff up front. With a list, the cursor sits on it
+    -- and drives everything from there; without one, the single entry is set up
+    -- directly. The shown_line guard makes a later <CR> on line 1 a no-op.
+    if show_list then
+        _open_list(session)
+        vim.api.nvim_win_set_cursor(session.list_win, { 1, 0 })
+        local entry, lnum = _entry_at_cursor(session)
+        if entry and lnum then _setup_diff(session, entry, lnum) end
+    elseif entries[1] then
+        _setup_diff(session, entries[1], 1)
+    end
 
     -- Land in the right (target) pane rather than the list: the file itself is
     -- what the user came to read -- and, where it's a writable on-disk file,
