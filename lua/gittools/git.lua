@@ -106,10 +106,18 @@ function M.verify_rev(root, rev)
     return M.run(root, { "rev-parse", "--verify", "--quiet", rev .. "^{tree}" }) ~= nil
 end
 
---- `git show` for `rev` without the patch: the commit header (hash, author,
---- date, ref decoration), the full message, and a diffstat of what it changed.
---- The patch itself is left out -- it is what `<CR>` opens a real diff for, and
---- a commit touching a few hundred files would bury the message.
+--- `git show` for `rev` without the patch: the commit header (hash, author and
+--- committer with dates, ref decoration), the full message, and a diffstat of
+--- what it changed. The patch itself is left out -- it is what `<CR>` opens a
+--- real diff for, and a commit touching a few hundred files would bury the
+--- message.
+---
+--- Every part of the header is pinned on the command line so the output does
+--- not depend on the user's git config: `format.pretty` (or `log.format`) could
+--- otherwise reduce this to a one-liner, `log.abbrevCommit` shorten the hash,
+--- `log.date` reformat the dates and `log.showSignature` splice in signature
+--- verification. `--pretty=fuller` is the widest built-in header, so the float
+--- always shows author *and* committer.
 ---@param root string
 ---@param rev  string
 ---@return string? stdout
@@ -117,6 +125,7 @@ end
 function M.show(root, rev)
     return M.run(root, {
         "--no-pager", "show", "--no-color", "--no-patch", "--stat",
+        "--pretty=fuller", "--no-abbrev-commit", "--no-show-signature",
         "--decorate=short", "--date=iso", rev,
     })
 end

@@ -10,7 +10,9 @@ local hover    = require("gittools.util.hover")
 --- show up as "Not committed". In the sidebar: the commit summary is echoed as
 --- the cursor moves, `<CR>` diffs the commit under the cursor against its
 --- parent (via `gittools.diff`), `K` shows that commit's details in a float,
---- and `q` closes the sidebar.
+--- and `q` closes the sidebar. The annotations are a snapshot, so the session
+--- ends as soon as they could go stale: either window closing, the file being
+--- edited, reloaded or replaced in its window, and the buffer being deleted.
 
 local _EMPTY_TREE   = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 local _MAX_AUTHOR_W = 20
@@ -38,8 +40,18 @@ end
 ---@field blame_win integer?
 ---@field blame_buf integer
 ---@field saved     table<string, any>  file-window options to restore on close
+---@field saved_side table<string, any> sidebar-window options, for the rare
+---                                     teardown that leaves that window alive
 ---@type GitTools.BlameSession?
 local _session = nil
+
+---@param win   integer
+---@param saved table<string, any>
+local function _restore_opts(win, saved)
+    for opt, val in pairs(saved) do
+        pcall(function() vim.wo[win][opt] = val end)
+    end
+end
 
 --- Tear down the active blame session: drop autocmds, close the sidebar, and
 --- restore the file window's scroll options. Safe to call anytime.
@@ -51,25 +63,23 @@ local function _end_blame()
     pcall(vim.api.nvim_del_augroup_by_id, s.group)
 
     if s.file_win and vim.api.nvim_win_is_valid(s.file_win) then
-        for opt, val in pairs(s.saved) do
-            vim.wo[s.file_win][opt] = val
-        end
+        _restore_opts(s.file_win, s.saved)
     end
 
     if s.blame_win and vim.api.nvim_win_is_valid(s.blame_win) then
-        -- The sidebar can be the last window in its tabpage (the file window
-        -- was the one closed), and then it can't be closed. Hand the window
-        -- back to the blamed file and undo the sidebar's look, rather than
-        -- leave the user sitting in a naked annotation column.
-        if not pcall(vim.api.nvim_win_close, s.blame_win, false) then
+        if vim.api.nvim_win_get_buf(s.blame_win) ~= s.blame_buf then
+            -- Something else took the window over (`:edit` from inside the
+            -- sidebar); it is the user's window now, so only undo our options.
+            _restore_opts(s.blame_win, s.saved_side)
+        elseif not pcall(vim.api.nvim_win_close, s.blame_win, false) then
+            -- The sidebar is the last window in its tabpage -- the file window
+            -- was the one closed -- so it can't be closed. Hand it back to the
+            -- blamed file rather than leave the user in a bare annotation
+            -- column.
             if vim.api.nvim_buf_is_valid(s.file_buf) then
                 vim.api.nvim_win_set_buf(s.blame_win, s.file_buf)
             end
-            vim.api.nvim_win_call(s.blame_win, function()
-                vim.cmd("setlocal winfixwidth< number< relativenumber< "
-                    .. "signcolumn< foldcolumn< list< winbar< "
-                    .. "scrollbind< cursorbind< wrap< foldenable<")
-            end)
+            _restore_opts(s.blame_win, s.saved_side)
         end
     end
     if vim.api.nvim_buf_is_valid(s.blame_buf) then
@@ -77,10 +87,9 @@ local function _end_blame()
     end
 end
 
---- Defer teardown to the next event loop tick: autocmds fire mid-close and
---- mid-edit, where closing a window trips Neovim's own bookkeeping (E445), and
---- `BufWinLeave` runs *before* the buffer actually leaves the window, so the
---- checks in `_end_soon` need the settled layout.
+--- Defer teardown to the next event loop tick: the events that end a session
+--- fire *mid*-close and mid-edit, where closing another window trips Neovim's
+--- own bookkeeping (E445) and the window layout isn't settled yet.
 ---@param session GitTools.BlameSession
 local function _end_soon(session)
     vim.schedule(function()
@@ -202,8 +211,8 @@ local function _show_details(root, entry)
     hover.show(out, { title = entry.hash:sub(1, 7), syntax = "git" })
 end
 
---- Bind scrolling between the file window and the blame sidebar, saving the
---- file window's previous option values for restoration on teardown.
+--- Bind scrolling between the file window and the blame sidebar, saving both
+--- windows' previous option values for restoration on teardown.
 ---@param session GitTools.BlameSession
 local function _bind_windows(session)
     local fw, bw = session.file_win, session.blame_win
@@ -211,6 +220,7 @@ local function _bind_windows(session)
     ---@cast bw integer
     for _, opt in ipairs({ "scrollbind", "cursorbind", "wrap", "foldenable" }) do
         session.saved[opt] = vim.wo[fw][opt]
+        session.saved_side[opt] = vim.wo[bw][opt]
     end
     for _, win in ipairs({ fw, bw }) do
         vim.wo[win].scrollbind = true
@@ -282,6 +292,15 @@ function M.blame()
 
     vim.cmd("leftabove vsplit")
     local blame_win = vim.api.nvim_get_current_win()
+
+    -- Remember the fresh split's inherited options: teardown usually just
+    -- closes this window, but not always (see `_end_blame`).
+    local saved_side = {}
+    for _, opt in ipairs({ "winfixwidth", "number", "relativenumber",
+        "signcolumn", "foldcolumn", "list", "winbar" }) do
+        saved_side[opt] = vim.wo[blame_win][opt]
+    end
+
     vim.api.nvim_win_set_buf(blame_win, blame_buf)
     vim.api.nvim_win_set_width(blame_win, width + 1)
     vim.wo[blame_win].winfixwidth    = true
@@ -300,6 +319,7 @@ function M.blame()
         blame_win = blame_win,
         blame_buf = blame_buf,
         saved     = {},
+        saved_side = saved_side,
     }
     _session = session
 
@@ -362,10 +382,7 @@ function M.blame()
     vim.api.nvim_create_autocmd({ "BufWinLeave", "BufWipeout" }, {
         group    = group,
         buffer   = blame_buf,
-        callback = function()
-            session.blame_win = nil
-            _end_soon(session)
-        end,
+        callback = function() _end_soon(session) end,
     })
 
     vim.api.nvim_create_autocmd("CursorMoved", {
@@ -391,6 +408,9 @@ function M.blame()
         local e = entries[lnum]
         if e then _show_details(root, e) end
     end, { buffer = blame_buf, desc = "Show details of commit under cursor" })
+
+    vim.keymap.set("n", "q", function() _end_blame() end,
+        { buffer = blame_buf, desc = "Close the blame sidebar" })
 end
 
 return M
