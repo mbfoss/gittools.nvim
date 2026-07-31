@@ -1,6 +1,6 @@
 local M        = {}
 
-local git      = require("gittools.git")
+local git      = require("gittools.util.git")
 local difftool = require("gittools.diff")
 local hover    = require("gittools.util.hover")
 

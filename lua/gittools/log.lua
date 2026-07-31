@@ -3,7 +3,7 @@ local M        = {}
 ---@diagnostic disable-next-line: deprecated
 local unpack   = table.unpack or unpack
 
-local git      = require("gittools.git")
+local git      = require("gittools.util.git")
 local difftool = require("gittools.diff")
 local ui       = require("gittools.util.ui")
 local hover    = require("gittools.util.hover")

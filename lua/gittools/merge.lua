@@ -1,6 +1,6 @@
 local M   = {}
 
-local git = require("gittools.git")
+local git = require("gittools.util.git")
 
 --- The conflict-resolution feature behind `:GitTool merge`. It serves three
 --- entry points with one implementation:

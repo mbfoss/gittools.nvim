@@ -1,6 +1,6 @@
 local M   = {}
 
-local git = require("gittools.git")
+local git = require("gittools.util.git")
 
 --- The single-file feature behind `:GitTool diffthis [<rev>]`. It diffs the
 --- *current buffer* -- including unsaved edits -- against its git version using

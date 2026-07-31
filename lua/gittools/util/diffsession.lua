@@ -1,6 +1,6 @@
 local M          = {}
 
-local git        = require("gittools.git")
+local git        = require("gittools.util.git")
 local ui         = require("gittools.util.ui")
 
 --- The generic engine behind the side-by-side diff UI: it takes a flat list of

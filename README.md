@@ -5,7 +5,7 @@ under a single `:GitTool` command.
 
 | command | what it does |
 | --- | --- |
-| `GitTool diff [--staged] [<rev> [<rev>]]` | directory diff: file list + side-by-side layout |
+| `GitTool diff [--staged] [<rev> [<rev>]] [-- <path>...]` | directory diff: file list + side-by-side layout |
 | `GitTool diffpaths <a> <b>` | diff two files or two directories off disk (no repo needed) |
 | `GitTool diffthis [<rev>]` | diff the current buffer, including unsaved edits |
 | `GitTool log [<opt>...] [<rev>] [-- <path>]` | browse commit history as an interactive list |
@@ -21,6 +21,36 @@ unnamed buffer, i.e. an editor you haven't used yet. Closing such a view closes
 the tab with it, putting you back exactly where you launched it from.
 `diffthis`, `blame` and `merge` are about the buffer you're in, so they stay in
 the current tab.
+
+## `GitTool diff`
+
+Takes the same arguments as `git diff`: no revision compares the index against
+the working tree, one compares that revision against the working tree, two
+compare the revisions with each other, and `--staged` (or `--cached`) compares
+`HEAD` -- or the revision you name -- against the index.
+
+Trailing paths limit the diff to those files, exactly as on git's command line,
+and are resolved relative to your current directory:
+
+```vim
+:GitTool diff                          " index vs working tree
+:GitTool diff HEAD~3                   " ...against an older commit
+:GitTool diff --staged                 " HEAD vs index
+:GitTool diff main dev                 " two revisions
+:GitTool diff lua/gittools/diff.lua    " one file, index vs working tree
+:GitTool diff main dev -- lua/ README.md
+:GitTool diff HEAD -- '*.lua'          " a pathspec, so it needs the --
+```
+
+The `--` is optional when the arguments can't be mistaken for revisions --
+gittools resolves each one the way git does, taking it as a revision if it names
+one and as a path if it exists on disk. A wildcard matches neither, so pass
+those after a `--`; without it you get git's own complaint about an ambiguous
+argument.
+
+Untracked files show up whenever the working tree is the right-hand side, and so
+do files you have edited but not yet written, diffed straight from the buffer.
+Pathspecs filter both.
 
 ## `GitTool log` and `GitTool graph`
 

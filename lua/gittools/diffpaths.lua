@@ -1,6 +1,6 @@
 local M       = {}
 
-local git     = require("gittools.git")
+local git     = require("gittools.util.git")
 local session = require("gittools.util.diffsession")
 
 --- The path-backed front end for `:GitTool diffpaths`. It compares two

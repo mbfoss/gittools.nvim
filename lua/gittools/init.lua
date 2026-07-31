@@ -4,7 +4,7 @@ local M        = {}
 local unpack   = table.unpack or unpack
 
 local usercmd  = require("gittools.util.usercmd")
-local git      = require("gittools.git")
+local git      = require("gittools.util.git")
 local difftool = require("gittools.diff")
 local diffpaths = require("gittools.diffpaths")
 local diffthis = require("gittools.diffthis")
@@ -14,7 +14,8 @@ local merge    = require("gittools.merge")
 
 --- `:GitTool` -- a git-backed front end for Neovim's native diff facilities.
 ---   GitTool diff [--staged] [<rev> [<rev>]]   directory diff via the built-in
----                                             difftool (file list + layout)
+---                [-- <path>...]                difftool (file list + layout),
+---                                             limited to <path> if given
 ---   GitTool diffpaths <a> <b>                 diff two files or two directories
 ---                                             off disk (no repository needed)
 ---   GitTool diffthis [<rev>]                  diff the current buffer (incl.
@@ -70,13 +71,15 @@ end
 ---@param args string[]
 ---@return string[] before
 ---@return string[] after
+---@return boolean  found  whether a `--` was present at all (an empty `after`
+---                        alone cannot tell a trailing `--` from no separator)
 local function _split_sep(args)
     for i, a in ipairs(args) do
         if a == "--" then
-            return { unpack(args, 1, i - 1) }, { unpack(args, i + 1) }
+            return { unpack(args, 1, i - 1) }, { unpack(args, i + 1) }, true
         end
     end
-    return args, {}
+    return args, {}, false
 end
 
 --- `git log` options that take their value as a separate argument when it is
@@ -138,8 +141,14 @@ function M.setup()
     usercmd.register_user_cmd("GitTool", function(_, args)
         local sub = args[1]
         if sub == "diff" then
-            local staged, revs = _parse_flags({ unpack(args, 2) })
-            difftool.diff({ staged = staged, revs = revs })
+            local before, paths, sep = _split_sep({ unpack(args, 2) })
+            local staged, positionals = _parse_flags(before)
+            -- Without a `--`, the positionals are still a mix of revisions and
+            -- paths; only `gittools.diff` (which knows the repo) can tell them
+            -- apart, so hand them over unsplit.
+            difftool.diff(sep
+                and { staged = staged, revs = positionals, paths = paths }
+                or { staged = staged, args = positionals })
         elseif sub == "diffpaths" then
             local paths = { unpack(args, 2) }
             if #paths ~= 2 then
@@ -202,14 +211,19 @@ function M.setup()
                 return vim.fn.getcompletion(arg_lead, "file")
             elseif sub == "diff" then
                 local out = {}
-                local has_flag = false
+                local has_flag, has_sep = false, false
                 for _, a in ipairs(rest) do
                     if a == "--staged" or a == "--cached" then has_flag = true end
+                    if a == "--" then has_sep = true end
+                end
+                if has_sep then
+                    return vim.fn.getcompletion(arg_lead, "file")
                 end
                 if not has_flag then
                     out[#out + 1] = "--staged"
                     out[#out + 1] = "--cached"
                 end
+                out[#out + 1] = "--"
                 vim.list_extend(out, git.refs())
                 return out
             elseif sub == "diffthis" then
