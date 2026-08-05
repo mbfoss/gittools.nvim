@@ -7,7 +7,7 @@ see [README.md](README.md).
 ## Layout
 
 ```
-plugin/gittools.lua          version guard only (nvim >= 0.10)
+plugin/gittools.lua          version guard (nvim >= 0.10) + lazy :GitTool
 lua/gittools/init.lua        :GitTool registration, argument parsing, completion
 lua/gittools/diff.lua        git-backed file list for `diff`
 lua/gittools/diffpaths.lua   path-backed file list for `diffpaths`
@@ -23,10 +23,22 @@ lua/gittools/util/
     hover.lua                LSP-style floating preview
 ```
 
-`init.lua` owns only command registration and argument parsing; every feature
-has its own module. `M.setup()` is not called from `plugin/`, so a host
-config has to call it — this keeps loading under the config's control (the
-plugin ships in `pack/*/opt`).
+`init.lua` owns only argument parsing and completion; every feature has its own
+module.
+
+Loading is driven from `plugin/gittools.lua`, which registers `:GitTool`
+through `util/usercmd` — the argument splitter and completion dispatcher, which
+knows nothing about the subcommands — and is the only module read at startup.
+The run and completion callbacks it passes are `require("gittools").run` /
+`.complete` behind a `require` performed at call time, so `init.lua` and the
+feature modules it pulls in are read on the first `:GitTool` invocation (or the
+first `<Tab>`), not before. `init.lua` has no load-time side effects of its
+own.
+
+There is no `setup()`. Registration belongs to `plugin/`, which every loading
+path reaches — including `packadd!` during startup, whose bang only suppresses
+sourcing at that moment and leaves it to the normal plugin pass. (A `packadd!`
+issued *after* startup never sources `plugin/`; use the plain `packadd` there.)
 
 ## The diff session engine
 
@@ -219,6 +231,10 @@ Every group is defined with `default = true` so a colorscheme wins.
   diff pane or spell-checks a list of hashes.
 - Generated buffers are `buftype=nofile` scratch buffers via
   `ui.create_scratch_buffer`, unlisted ones with `bufhidden=wipe`.
-- Sessions clean themselves up on `VimLeavePre` (`init.lua`'s augroup) and on
-  any event that could make their snapshot stale — for `blame`, that is the
-  file being edited, reloaded, replaced in its window, or deleted.
+- Sessions clean themselves up on any event that could make their snapshot
+  stale — for `blame`, that is the file being edited, reloaded, replaced in its
+  window, or deleted. Nothing hooks `VimLeavePre`: teardown only undoes
+  process-local state (windows, scratch buffers, window-local diff options),
+  and the merge tempfiles come from `vim.fn.tempname()`, whose directory
+  Neovim removes on exit. `diff.clear_session()` / `merge.clear_session()`
+  remain for an embedder that wants to force it.

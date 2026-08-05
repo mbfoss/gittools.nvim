@@ -3,7 +3,6 @@ local M        = {}
 ---@diagnostic disable-next-line: deprecated
 local unpack   = table.unpack or unpack
 
-local usercmd  = require("gittools.util.usercmd")
 local git      = require("gittools.util.git")
 local difftool = require("gittools.diff")
 local diffpaths = require("gittools.diffpaths")
@@ -36,11 +35,10 @@ local merge    = require("gittools.merge")
 ---                                             none, meaning the current
 ---                                             buffer) the other three sides
 ---                                             are read from its index stages
---- This module owns only command registration and argument parsing; the work
---- lives in `gittools.diff` / `gittools.diffthis` / `gittools.log` /
---- `gittools.blame` / `gittools.merge`.
-
-local _AUGROUP = "gittools"
+--- This module owns only argument parsing and completion, as `M.run` and
+--- `M.complete`; the command itself is registered in `plugin/gittools.lua`,
+--- and the work lives in `gittools.diff` / `gittools.diffpaths` /
+--- `gittools.diffthis` / `gittools.log` / `gittools.blame` / `gittools.merge`.
 
 ---@param msg string
 ---@param level integer?
@@ -127,126 +125,121 @@ local function _split_opts(args)
     return opts, revs
 end
 
---- Register `:GitTool`. Auto-called by the central module loader.
-function M.setup()
-    local group = vim.api.nvim_create_augroup(_AUGROUP, { clear = true })
-    vim.api.nvim_create_autocmd("VimLeavePre", {
-        group    = group,
-        callback = function()
-            difftool.clear_session()
-            merge.clear_session()
-        end,
-    })
-
-    usercmd.register_user_cmd("GitTool", function(_, args)
-        local sub = args[1]
-        if sub == "diff" then
-            local before, paths, sep = _split_sep({ unpack(args, 2) })
-            local staged, positionals = _parse_flags(before)
-            -- Without a `--`, the positionals are still a mix of revisions and
-            -- paths; only `gittools.diff` (which knows the repo) can tell them
-            -- apart, so hand them over unsplit.
-            difftool.diff(sep
-                and { staged = staged, revs = positionals, paths = paths }
-                or { staged = staged, args = positionals })
-        elseif sub == "diffpaths" then
-            local paths = { unpack(args, 2) }
-            if #paths ~= 2 then
-                _notify("GitTool diffpaths takes exactly two paths (two files or two directories)",
-                    vim.log.levels.ERROR)
-                return
-            end
-            diffpaths.diffpaths(paths[1], paths[2])
-        elseif sub == "diffthis" then
-            local revs = { unpack(args, 2) }
-            if #revs > 1 then
-                _notify("GitTool diffthis takes at most one revision", vim.log.levels.ERROR)
-                return
-            end
-            diffthis.diffthis({ rev = revs[1] })
-        elseif sub == "log" or sub == "graph" then
-            local before, paths = _split_sep({ unpack(args, 2) })
-            local log_opts, revs = _split_opts(before)
-            if #revs > 1 then
-                _notify("GitTool " .. sub .. " takes at most one revision", vim.log.levels.ERROR)
-                return
-            end
-            if #paths > 1 then
-                _notify("GitTool " .. sub .. " takes at most one path", vim.log.levels.ERROR)
-                return
-            end
-            local fn = sub == "log" and logtool.log or logtool.graph
-            fn({ rev = revs[1], path = paths[1], args = log_opts })
-        elseif sub == "stashlist" then
-            if args[2] then
-                _notify("GitTool stashlist takes no arguments", vim.log.levels.ERROR)
-                return
-            end
-            logtool.stash_log()
-        elseif sub == "blame" then
-            if args[2] then
-                _notify("GitTool blame takes no arguments", vim.log.levels.ERROR)
-                return
-            end
-            blame.blame()
-        elseif sub == "merge" then
-            local paths = { unpack(args, 2) }
-            if #paths <= 1 or #paths == 4 then
-                merge.merge({ paths = paths })
-            else
-                _notify("GitTool merge takes no arguments, a single file, or "
-                    .. "exactly four ($LOCAL $BASE $REMOTE $MERGED)",
-                    vim.log.levels.ERROR)
-            end
-        else
-            vim.api.nvim_echo({{"Argument required", "Error"}}, false, {})
+--- `:GitTool`'s implementation, as a `gittools.usercmd.run_fn`. Exposed so that
+--- `plugin/gittools.lua` can register the command without this module being
+--- loaded: it hands `util/usercmd` a wrapper that requires us on the first
+--- invocation.
+---@type gittools.usercmd.run_fn
+function M.run(_, args)
+    local sub = args[1]
+    if sub == "diff" then
+        local before, paths, sep = _split_sep({ unpack(args, 2) })
+        local staged, positionals = _parse_flags(before)
+        -- Without a `--`, the positionals are still a mix of revisions and
+        -- paths; only `gittools.diff` (which knows the repo) can tell them
+        -- apart, so hand them over unsplit.
+        difftool.diff(sep
+            and { staged = staged, revs = positionals, paths = paths }
+            or { staged = staged, args = positionals })
+    elseif sub == "diffpaths" then
+        local paths = { unpack(args, 2) }
+        if #paths ~= 2 then
+            _notify("GitTool diffpaths takes exactly two paths (two files or two directories)",
+                vim.log.levels.ERROR)
+            return
         end
-    end, {
-        desc          = "Git diff via Neovim's native diff tools",
-        subcommand_fn = function(_, rest, arg_lead)
-            if #rest == 0 then return { "diff", "diffpaths", "diffthis", "log", "graph", "stashlist", "blame", "merge" } end
+        diffpaths.diffpaths(paths[1], paths[2])
+    elseif sub == "diffthis" then
+        local revs = { unpack(args, 2) }
+        if #revs > 1 then
+            _notify("GitTool diffthis takes at most one revision", vim.log.levels.ERROR)
+            return
+        end
+        diffthis.diffthis({ rev = revs[1] })
+    elseif sub == "log" or sub == "graph" then
+        local before, paths = _split_sep({ unpack(args, 2) })
+        local log_opts, revs = _split_opts(before)
+        if #revs > 1 then
+            _notify("GitTool " .. sub .. " takes at most one revision", vim.log.levels.ERROR)
+            return
+        end
+        if #paths > 1 then
+            _notify("GitTool " .. sub .. " takes at most one path", vim.log.levels.ERROR)
+            return
+        end
+        local fn = sub == "log" and logtool.log or logtool.graph
+        fn({ rev = revs[1], path = paths[1], args = log_opts })
+    elseif sub == "stashlist" then
+        if args[2] then
+            _notify("GitTool stashlist takes no arguments", vim.log.levels.ERROR)
+            return
+        end
+        logtool.stash_log()
+    elseif sub == "blame" then
+        if args[2] then
+            _notify("GitTool blame takes no arguments", vim.log.levels.ERROR)
+            return
+        end
+        blame.blame()
+    elseif sub == "merge" then
+        local paths = { unpack(args, 2) }
+        if #paths <= 1 or #paths == 4 then
+            merge.merge({ paths = paths })
+        else
+            _notify("GitTool merge takes no arguments, a single file, or "
+                .. "exactly four ($LOCAL $BASE $REMOTE $MERGED)",
+                vim.log.levels.ERROR)
+        end
+    else
+        vim.api.nvim_echo({{"Argument required", "Error"}}, false, {})
+    end
+end
 
-            local sub = rest[1]
-            if sub == "diffpaths" then
-                return vim.fn.getcompletion(arg_lead, "file")
-            elseif sub == "diff" then
-                local out = {}
-                local has_flag, has_sep = false, false
-                for _, a in ipairs(rest) do
-                    if a == "--staged" or a == "--cached" then has_flag = true end
-                    if a == "--" then has_sep = true end
-                end
-                if has_sep then
-                    return vim.fn.getcompletion(arg_lead, "file")
-                end
-                if not has_flag then
-                    out[#out + 1] = "--staged"
-                    out[#out + 1] = "--cached"
-                end
-                out[#out + 1] = "--"
-                vim.list_extend(out, git.refs())
-                return out
-            elseif sub == "diffthis" then
-                return git.refs()
-            elseif sub == "merge" then
-                return vim.fn.getcompletion(arg_lead, "file")
-            elseif sub == "log" or sub == "graph" then
-                local has_sep = false
-                for _, a in ipairs(rest) do
-                    if a == "--" then has_sep = true end
-                end
-                if has_sep then
-                    return vim.fn.getcompletion(arg_lead, "file")
-                end
-                local out = { "--" }
-                vim.list_extend(out, _LOG_OPTS)
-                if sub == "log" then out[#out + 1] = "--reverse" end
-                vim.list_extend(out, git.refs())
-                return out
-            end
-            return {}
-        end,
-    })
+--- `:GitTool`'s completion, as a `gittools.usercmd.subcommand_fn`. Exposed for
+--- the same reason as `M.run`.
+---@type gittools.usercmd.subcommand_fn
+function M.complete(_, rest, arg_lead)
+    if #rest == 0 then return { "diff", "diffpaths", "diffthis", "log", "graph", "stashlist", "blame", "merge" } end
+
+    local sub = rest[1]
+    if sub == "diffpaths" then
+        return vim.fn.getcompletion(arg_lead, "file")
+    elseif sub == "diff" then
+        local out = {}
+        local has_flag, has_sep = false, false
+        for _, a in ipairs(rest) do
+            if a == "--staged" or a == "--cached" then has_flag = true end
+            if a == "--" then has_sep = true end
+        end
+        if has_sep then
+            return vim.fn.getcompletion(arg_lead, "file")
+        end
+        if not has_flag then
+            out[#out + 1] = "--staged"
+            out[#out + 1] = "--cached"
+        end
+        out[#out + 1] = "--"
+        vim.list_extend(out, git.refs())
+        return out
+    elseif sub == "diffthis" then
+        return git.refs()
+    elseif sub == "merge" then
+        return vim.fn.getcompletion(arg_lead, "file")
+    elseif sub == "log" or sub == "graph" then
+        local has_sep = false
+        for _, a in ipairs(rest) do
+            if a == "--" then has_sep = true end
+        end
+        if has_sep then
+            return vim.fn.getcompletion(arg_lead, "file")
+        end
+        local out = { "--" }
+        vim.list_extend(out, _LOG_OPTS)
+        if sub == "log" then out[#out + 1] = "--reverse" end
+        vim.list_extend(out, git.refs())
+        return out
+    end
+    return {}
 end
 
 return M

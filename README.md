@@ -27,18 +27,23 @@ Neovim >= 0.10 and `git` on your `PATH`.
 ## Installation
 
 With any plugin manager, or by dropping the repository into your package path.
-The plugin registers `:GitTool` from `require("gittools").setup()`, so call that
-once:
+There is nothing to configure and no setup call to make: `:GitTool` registers
+itself when the plugin loads, and the plugin's own modules are read only when
+the command is first used.
 
 ```lua
-require("gittools").setup()
+{ "gittools.nvim" }
 ```
 
-lazy.nvim:
+From `pack/*/opt`, `packadd` it as usual:
 
 ```lua
-{ "gittools.nvim", config = function() require("gittools").setup() end }
+vim.cmd.packadd("gittools.nvim")
 ```
+
+`packadd!` works too when it runs during startup, since `plugin/` scripts are
+sourced in the normal pass afterwards; after startup use the plain `packadd`,
+which sources them itself.
 
 ## `GitTool diff`
 
