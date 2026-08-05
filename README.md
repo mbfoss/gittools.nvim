@@ -1,7 +1,7 @@
 # gittools.nvim
 
-A git-backed front end for Neovim's native diff facilities. Everything lives
-under a single `:GitTool` command.
+A git-backed front end for Neovim's native diff facilities, under a single
+`:GitTool` command.
 
 | command | what it does |
 | --- | --- |
@@ -14,13 +14,31 @@ under a single `:GitTool` command.
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
 | `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
 
-The views that want room -- `diff`, `diffpaths`, `log`, `graph`, `stashlist` --
-open in a tab of their own rather than carving up the windows you already have.
+`diff`, `diffpaths`, `log`, `graph` and `stashlist` open in a tab of their own.
 The current tab is reused only when it is a single window holding an empty,
-unnamed buffer, i.e. an editor you haven't used yet. Closing such a view closes
-the tab with it, putting you back exactly where you launched it from.
-`diffthis`, `blame` and `merge` are about the buffer you're in, so they stay in
-the current tab.
+unnamed buffer. Closing such a view closes the tab with it, returning you to the
+window layout you launched it from. `diffthis`, `blame` and `merge` act on the
+current buffer and stay in the current tab.
+
+## Requirements
+
+Neovim >= 0.10 and `git` on your `PATH`.
+
+## Installation
+
+With any plugin manager, or by dropping the repository into your package path.
+The plugin registers `:GitTool` from `require("gittools").setup()`, so call that
+once:
+
+```lua
+require("gittools").setup()
+```
+
+lazy.nvim:
+
+```lua
+{ "gittools.nvim", config = function() require("gittools").setup() end }
+```
 
 ## `GitTool diff`
 
@@ -42,27 +60,47 @@ and are resolved relative to your current directory:
 :GitTool diff HEAD -- '*.lua'          " a pathspec, so it needs the --
 ```
 
-The `--` is optional when the arguments can't be mistaken for revisions --
-gittools resolves each one the way git does, taking it as a revision if it names
-one and as a path if it exists on disk. A wildcard matches neither, so pass
-those after a `--`; without it you get git's own complaint about an ambiguous
-argument.
+The `--` is optional when the arguments can't be mistaken for revisions: each
+one is taken as a revision if it names one, and as a path if it exists on disk.
+A wildcard matches neither, so pass those after a `--`; without it git reports
+an ambiguous argument.
 
-Untracked files show up whenever the working tree is the right-hand side, and so
-do files you have edited but not yet written, diffed straight from the buffer.
+Untracked files are listed whenever the working tree is the right-hand side, as
+are files you have edited but not yet written, which are diffed from the buffer.
 Pathspecs filter both.
 
-A changed submodule is listed like anything else, and `<CR>` shows it the way
-git does, as the pair of commit ids it points at. What actually changed, though,
-is a whole repository one level down, so `c` on a submodule row opens a *second*
-diff over the submodule itself, in a tab of its own: the same file list and
-side-by-side layout, between
-the commits the parent records (or against the submodule's own working tree,
-when that is what the parent is being compared against, so uncommitted edits
-inside it show too). The session you launched from stays open behind it, and
-closing the submodule's tab puts you back in it. Diff sessions are independent
-that way in general -- each lives in its own tab, and `]f` / `[f` step through
-the file list of whichever one you're in.
+The layout is a file list in a bottom split driving a side-by-side diff:
+
+| key | action |
+| --- | --- |
+| `<CR>` | show the file under the cursor and jump into the diff |
+| `]f` / `[f` | show the next / previous file, from anywhere in the tab |
+| `c` | on a submodule row, open the submodule's own diff in a new tab |
+
+`]f` / `[f` step through the file list of the session in the current tab, so two
+diffs open at once stay independent.
+
+A changed submodule is listed like any other entry, and `<CR>` shows it as the
+pair of commit ids it points at, as git does. `c` on a submodule row opens a
+second diff over the submodule itself, in a tab of its own, with the same file
+list and side-by-side layout: between the commits the parent records, or against
+the submodule's own working tree when that is what the parent is being compared
+against, so uncommitted edits inside it show too. The session you launched from
+stays open, and closing the submodule's tab returns you to it.
+
+## `GitTool diffthis`
+
+Diffs the current buffer -- unsaved edits included -- against its git version in
+a side split, using Neovim's native diff mode. With no argument the git side is
+the index; pass a revision to compare against that instead:
+
+```vim
+:GitTool diffthis
+:GitTool diffthis HEAD~1
+```
+
+The git side is a read-only scratch buffer on the left; the live buffer is on
+the right, so the diff tracks edits as you type.
 
 ## `GitTool log` and `GitTool graph`
 
@@ -75,8 +113,8 @@ optional revision to start from and an optional path to scope to:
 :GitTool graph -- lua/gittools    " ...only commits touching a path
 ```
 
-Anything else starting with `-` is a `git log` option, handed to git as
-written, so the usual revision selection and filtering works here too:
+Anything else starting with `-` is a `git log` option, handed to git as written,
+so the usual revision selection and filtering applies:
 
 ```vim
 :GitTool graph --all              " every branch, tag and remote, not just HEAD
@@ -87,23 +125,23 @@ written, so the usual revision selection and filtering works here too:
 
 Completion offers the common ones (`--all`, `--branches`, `--remotes`,
 `--tags`, `--first-parent`, `--merges`, `--no-merges`, `--author=`, `--grep=`,
-`--since=`, `--until=`, `-n`, ...) alongside the ref names. Options that
-replace the one-line-per-commit output -- `--pretty`, `--format`, `--oneline`,
-`--stat`, `--patch`, `--name-status`, `-z` and friends -- are rejected with a
-message rather than silently producing an unreadable buffer, as is `--graph`
-itself (gittools draws the rails). `--reverse` works in `log`; `graph` rejects
-it, since the layout needs children before parents. Anything git doesn't
-recognise comes back as git's own error.
+`--since=`, `--until=`, `-n`, ...) alongside the ref names. Options that replace
+the one-line-per-commit output -- `--pretty`, `--format`, `--oneline`, `--stat`,
+`--patch`, `--name-status`, `-z` and similar -- are rejected with a message, as
+is `--graph` (gittools draws the rails). `--reverse` works in `log`; `graph`
+rejects it. Anything git doesn't recognise comes back as git's own error.
 
-In either view `<CR>` diffs the commit under the cursor against its first
-parent (a root commit against the empty tree), `K` shows the commit's details
-(header, message and diffstat) in a float, and `q` closes the view.
+| key | action |
+| --- | --- |
+| `<CR>` | diff the commit under the cursor (against its first parent, or the marked base) |
+| `c` | mark / unmark the commit under the cursor as the comparison base |
+| `K` | show the commit's header, message and diffstat in a float |
+
 `GitTool stashlist` is the same view over `git stash list`, with each entry
 labelled by the `stash@{N}` selector you would type at `git stash
 apply/pop/drop`.
 
-`c` marks the commit under the cursor as the comparison base, drawn with a `»`
-in front of it:
+The marked commit is drawn with a `»` in front of it:
 
 ```
 ●   4bebd0e 2025-06-13 Ren  (HEAD -> main) Merge pull request #40 from feat/toggle
@@ -111,20 +149,17 @@ in front of it:
 ●   9d3e871 2025-06-10 Ren  Tidy up the option table
 ```
 
-From then on `<CR>` diffs against that commit instead of against parents, so you
-can walk the list and compare anything you land on with the same base. Only one
-commit is ever marked: `c` elsewhere moves the mark, and `c` on the marked
-commit clears it, putting `<CR>` back to parent diffs. (`<CR>` on the marked
-commit itself would compare it with itself, so that one still diffs against its
-parent.)
+From then on `<CR>` diffs against that commit instead of against parents, so any
+commit in the list can be compared with the same base. Only one commit is ever
+marked: `c` elsewhere moves the mark, and `c` on the marked commit clears it,
+putting `<CR>` back to parent diffs. (`<CR>` on the marked commit itself would
+compare it with itself, so that one still diffs against its parent.)
 
-The history stays open behind the diffs it launches: the diff gets a tab of its
-own, so `q` there lands you back on the same commit, ready to open the next one.
+The diff opens in a tab of its own and the history stays open, so closing the
+diff returns you to the same commit in the list.
 
-`graph` adds the commit tree in front of each commit and the ref names after
-the author. The rails are drawn by gittools rather than by `git log --graph`,
-in box-drawing glyphs with rounded corners, and each rail is coloured by the
-column it occupies so two branches side by side stay easy to tell apart:
+`graph` adds the commit tree in front of each commit and the ref names after the
+author, in box-drawing glyphs, each rail coloured by the column it occupies:
 
 ```
 ◆   4bebd0e 2025-06-13 Ren  (HEAD -> main) Merge pull request #40 from feat/toggle
@@ -138,19 +173,27 @@ column it occupies so two branches side by side stay easy to tell apart:
 out below the merge commit that brought it in and curves back into the commit
 where it forked, so a rail spans exactly the commits that are on it.
 
-Commits come out in topological order (what `git log --graph` uses too), which
-keeps a branch's commits in one unbroken run instead of interleaving them with
-whatever else was committed the same week. Scoping to a path turns on git's
-parent rewriting, so the rails still join up across the commits that the path
-filter dropped. Either view loads at most 500 commits unless you pass an `-n`/`--max-count` of
-your own; rails whose next commit falls past that limit simply run off the
-bottom.
+Commits come out in topological order, as with `git log --graph`, so a branch's
+commits appear in one unbroken run rather than interleaved by date. Scoping to a
+path still joins the rails up across the commits the path filter dropped. Either
+view loads at most 500 commits unless you pass an `-n`/`--max-count`; rails
+whose next commit falls past that limit run off the bottom.
 
-### Highlights
+## `GitTool blame`
 
-The rail colours are `GitToolsGraph1` through `GitToolsGraph6`, cycled by
-column, and the comparison-base marker is `GitToolsLogMark`. They link to
-sensible defaults and can be overridden by a colorscheme.
+Annotates the current buffer with per-line commit info in a scroll-bound
+sidebar. The buffer's live contents are blamed, so unsaved edits stay
+line-aligned and are shown as "Not committed". Moving the cursor echoes the
+commit's summary.
+
+| key | action |
+| --- | --- |
+| `<CR>` | diff the commit under the cursor against its parent |
+| `K` | show that commit's details in a float |
+
+The annotations are a snapshot, so the sidebar closes as soon as they could go
+stale: on either window closing, or on the file being edited, reloaded, replaced
+or deleted.
 
 ## `GitTool diffpaths`
 
@@ -163,13 +206,13 @@ kind:
 :GitTool diffpaths ./before ./after               " two directories
 ```
 
-Two files open straight into the diff. Two directories are compared recursively
-(via `git diff --no-index`) and every differing file becomes a row in the list,
-with added/deleted files showing an empty pane on the missing side. It completes
-paths, so `:GitTool diffpaths <Tab>` works.
+Two files open directly into the diff. Two directories are compared recursively
+and every differing file becomes a row in the list, with added/deleted files
+showing an empty pane on the missing side. It completes paths, so
+`:GitTool diffpaths <Tab>` works.
 
 The two-argument form is also git's difftool calling convention, so gittools can
-serve as your `git difftool`:
+be used as `git difftool`:
 
 ```ini
 [difftool "gittools_diff"]
@@ -179,16 +222,9 @@ serve as your `git difftool`:
 ```
 
 Then `git difftool` opens each changed file in the layout, and `git difftool -d`
-(directory mode) opens the whole change set at once.
-
-Submodules survive that round trip. `git difftool -d` cannot check a submodule
-out into its temp trees, so it writes it as a one-line file holding the gitlink
-(`Subproject commit <sha>`, with an all-zero id standing in for whichever side
-is your working tree). gittools recognises those, resolves the submodule back to
-the real repository you ran the command in, and `c` on the row opens its diff in
-its own tab exactly as in `GitTool diff` -- against the commit the other side
-records, or against the submodule's live working tree where that is what the
-zeros mean.
+(directory mode) opens the whole change set at once. Submodules are handled
+there too: they are listed as rows like any other change, and `c` opens the
+submodule's own diff in its own tab, as in `GitTool diff`.
 
 The `\"` escaping is required: git's config parser strips a plain `"..."` from
 the value, which would leave nvim running a bare `GitTool` (no subcommand, so it
@@ -211,12 +247,11 @@ It takes three forms:
 
 The first two name only `$MERGED` -- explicitly, or implicitly as the current
 buffer -- and recover the other three sides from that file's index stages, so
-they work on any conflicted file in the repo. The single-file form is handy for
-jumping straight to a conflict from a file list without opening it first (it
-completes paths, so `:GitTool merge <Tab>` works).
+they work on any conflicted file in the repo. The single-file form completes
+paths, so `:GitTool merge <Tab>` works.
 
-The four-argument form is git's classic mergetool calling convention. To use it
-as your mergetool:
+The four-argument form is git's mergetool calling convention. To use it as your
+mergetool:
 
 ```ini
 [mergetool "gittools_merge"]
@@ -228,12 +263,12 @@ as your mergetool:
 
 Then `git mergetool` opens each conflicted file in turn.
 
-`trustExitCode = false` matters here. This view never writes `$MERGED` for you --
-resolving is an edit and `:w` is how it lands -- so quitting with `:q` leaves the
+`trustExitCode = false` matters here. This view never writes `$MERGED`;
+resolving is an edit, and `:w` is what saves it, so quitting with `:q` leaves the
 file untouched and exits 0. With `trustExitCode = true` git would read that 0 as
 "resolved" and stage the file with its conflict markers still in it. With it
-`false`, git instead checks whether the file actually changed: if you saved, it
-accepts the resolution silently; if you didn't, it tells you
+`false`, git checks whether the file actually changed: if you saved, it accepts
+the resolution silently; if you didn't, it reports
 
 ```
 $MERGED seems unchanged.
@@ -255,11 +290,11 @@ All conflict maps share an `x` prefix, matching the `]x` / `[x` motions:
 | `]x` / `[x` | jump to the next / previous conflict |
 | `xd` | toggle the `$LOCAL` \| `$MERGED` \| `$REMOTE` three-way **d**iff |
 
-These are buffer-local to `$MERGED`, but note that while they are active a bare
-`x` (delete character) waits `'timeoutlen'` to see whether one of them follows.
+These are buffer-local to `$MERGED`. Note that while they are active, a bare `x`
+(delete character) waits `'timeoutlen'` to see whether one of them follows.
 
-Accepting only edits the buffer -- save with `:w` as usual. Nothing here stages
-or checks out; `git mergetool` stages `$MERGED` itself on exit.
+Accepting only edits the buffer -- save with `:w`. Nothing here stages or checks
+out; `git mergetool` stages `$MERGED` itself on exit.
 
 ### Base text
 
@@ -270,16 +305,26 @@ or checks out; `git mergetool` stages `$MERGED` itself on exit.
     conflictStyle = zdiff3
 ```
 
-git writes the base into the conflict markers itself and `xa` reads it straight
-from the buffer. Otherwise gittools recovers it by re-merging the three inputs
-with `git merge-file --diff3`, matching conflicts by position. That
-correspondence only holds while the file's conflicts still line up with a fresh
-merge, so once you have hand-edited or resolved some regions `xa` declines
-rather than paste in text from the wrong place. `zdiff3` is the more reliable
-setup. An add/add conflict has no ancestor at all, so `xa` never applies there.
+git writes the base into the conflict markers itself and `xa` reads it from the
+buffer. Otherwise gittools recovers it by re-merging the three inputs, which
+only works while the file's conflicts still line up with a fresh merge: once you
+have hand-edited or resolved some regions, `xa` declines rather than insert text
+from the wrong region. `zdiff3` is the more reliable setup. An add/add conflict
+has no ancestor, so `xa` never applies there.
 
-### Highlights
+## Highlights
 
-All link to sensible defaults and can be overridden by a colorscheme:
-`GitToolsMergeCurrent`, `GitToolsMergeIncoming`, `GitToolsMergeBase`,
-`GitToolsMergeMarker`, `GitToolsMergeLabel`.
+All link to defaults and can be overridden by a colorscheme.
+
+| group | where |
+| --- | --- |
+| `GitToolsStatusAdded` / `Modified` / `Deleted` / `Renamed` / `Copied` / `Untracked` | the status letter in a diff file list |
+| `GitToolsRenameOldPath`, `GitToolsRenameArrow` | rename entries in that list |
+| `GitToolsGraph1` .. `GitToolsGraph6` | graph rails, cycled by column |
+| `GitToolsLogMark` | the `»` comparison-base marker |
+| `GitToolsMergeCurrent` / `Incoming` / `Base` / `Marker` / `Label` | the merge view's bands |
+
+## Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for internals, design notes and
+conventions.
