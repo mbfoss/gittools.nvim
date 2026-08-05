@@ -101,7 +101,7 @@ end
 --- nothing here is loaded until the command is first run.
 ---@param opts vim.api.keyset.create_user_command.command_args
 ---@param run_fn gittools.usercmd.run_fn
-function M.dispatch(opts, run_fn)
+function M.handle(opts, run_fn)
     local cmd = opts.name
     local args = _split_args(opts.args)
     local ok, err = pcall(run_fn, cmd, args, opts)

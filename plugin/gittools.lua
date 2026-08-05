@@ -26,7 +26,7 @@ local function _gittools()
 end
 
 vim.api.nvim_create_user_command("GitTool", function(opts)
-    _usercmd().dispatch(opts, function(cmd, args, cmd_opts)
+    _usercmd().handle(opts, function(cmd, args, cmd_opts)
         return _gittools().run(cmd, args, cmd_opts)
     end)
 end, {
