@@ -3,6 +3,43 @@ local M = {}
 --- Low-level git plumbing shared by the GitTool subcommands: running git,
 --- splitting its output, and resolving repo roots / paths / revisions. No UI.
 
+--- Environment variables that pin git to one particular repository regardless
+--- of the directory it runs in. Every question this module asks is of the form
+--- "which repository is this path in, and what does it say", answered by the
+--- `cwd` each command is given -- so an inherited scoping variable does not
+--- refine that answer, it overrides it with a different repository's.
+---
+--- Neovim launched as a difftool or mergetool is the case that matters: `git
+--- difftool` exports `GIT_DIR` and `GIT_WORK_TREE`, and with those set
+--- `git -C <submodule> rev-parse --show-toplevel` reports the *parent* worktree
+--- and `rev-parse HEAD` the parent's HEAD, so a submodule looks like it is not a
+--- repository at all.
+local _SCOPING_VARS = {
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+    "GIT_PREFIX",
+}
+
+--- Options to hand `vim.system` so git discovers its repository from `cwd`
+--- alone: the current environment minus `_SCOPING_VARS`. Returns just `text`
+--- when none of them is set, which is the ordinary case -- the environment is
+--- only rebuilt when there is something in it to drop.
+---@return table
+local function _sysopts(cwd)
+    local dirty = false
+    for _, name in ipairs(_SCOPING_VARS) do
+        if vim.env[name] then
+            dirty = true
+            break
+        end
+    end
+    if not dirty then return { text = true, cwd = cwd } end
+
+    local env = vim.fn.environ()
+    for _, name in ipairs(_SCOPING_VARS) do env[name] = nil end
+    return { text = true, cwd = cwd, env = env, clear_env = true }
+end
+
 --- Run `git <args>` in `cwd`. Returns trimmed stdout on success, or nil with
 --- the (trimmed) stderr on failure.
 ---@param cwd  string
@@ -12,7 +49,7 @@ local M = {}
 function M.run(cwd, args)
     local cmd = { "git" }
     vim.list_extend(cmd, args)
-    local res = vim.system(cmd, { text = true, cwd = cwd }):wait()
+    local res = vim.system(cmd, _sysopts(cwd)):wait()
     if res.code ~= 0 then
         return nil, vim.trim(res.stderr or "")
     end
@@ -30,7 +67,9 @@ end
 function M.run_raw(cwd, args, stdin)
     local cmd = { "git" }
     vim.list_extend(cmd, args)
-    local res = vim.system(cmd, { text = true, cwd = cwd, stdin = stdin }):wait()
+    local opts = _sysopts(cwd)
+    opts.stdin = stdin
+    local res = vim.system(cmd, opts):wait()
     if res.code ~= 0 then
         return nil, vim.trim(res.stderr or "")
     end
@@ -52,7 +91,7 @@ function M.diff_no_index(a, b)
     local res = vim.system({
         "git", "-c", "core.quotePath=false",
         "diff", "--no-index", "--name-status", "--", a, b,
-    }, { text = true }):wait()
+    }, _sysopts(nil)):wait()
     if res.code >= 2 then
         return nil, vim.trim(res.stderr or "")
     end
@@ -75,7 +114,7 @@ end
 function M.merge_file_diff3(cwd, local_path, base, remote)
     local res = vim.system({
         "git", "merge-file", "--diff3", "-p", local_path, base, remote,
-    }, { text = true, cwd = cwd }):wait()
+    }, _sysopts(cwd)):wait()
     if res.code < 0 or res.code >= 128 then return nil end
     return res.stdout or ""
 end
@@ -94,6 +133,22 @@ end
 ---@return string?
 function M.root(cwd)
     return (M.run(cwd or vim.uv.cwd() or ".", { "rev-parse", "--show-toplevel" }))
+end
+
+--- The commit `dir` is checked out at, but only when `dir` is a repository root
+--- in its own right. Asking `rev-parse HEAD` there directly would not do: git
+--- walks upwards, so a submodule directory that is empty or uninitialized
+--- answers with the enclosing repository's HEAD -- a plausible-looking hash
+--- belonging to a different repo. Both facts come out of one call.
+---@param dir string
+---@return string? head
+function M.head_at(dir)
+    local out = M.run(dir, { "rev-parse", "--show-toplevel", "HEAD" })
+    local lines = M.lines(out)
+    if #lines < 2 or vim.fs.normalize(lines[1]) ~= vim.fs.normalize(dir) then
+        return nil
+    end
+    return lines[2]
 end
 
 --- Whether `rev` resolves to a tree-ish (commit, tag, or tree object) in

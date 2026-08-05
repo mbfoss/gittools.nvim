@@ -388,8 +388,13 @@ function M.diff_submodule(data)
     ---@return GitTools.Side? side  nil when the commit is missing locally
     local function _sub_side(side, sha)
         if side.worktree then return { worktree = true } end
-        -- No recorded commit means the submodule is absent on this side (it was
-        -- added or removed): compare against nothing at all.
+        -- A `path` side that carries no commit is a `git difftool --dir-diff`
+        -- gitlink stand-in with the all-zero id in it, which is how git spells
+        -- "this side is the live working tree" there -- so that is what it
+        -- compares against. Anything else without a commit is a side the
+        -- submodule is simply absent from (it was added or removed), leaving
+        -- nothing at all to compare with.
+        if not sha and side.path then return { worktree = true } end
         if not sha then return { rev = _EMPTY_TREE } end
         if not git.verify_rev(root, sha) then
             _notify(("Submodule '%s' has no commit %s; fetch it first"):format(rel, sha),

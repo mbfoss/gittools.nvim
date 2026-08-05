@@ -8,11 +8,45 @@ local session = require("gittools.util.diffsession")
 --- files, or two directories (recursively) -- and hands the differing files to
 --- the generic `gittools.util.diffsession` engine, the same one `gittools.diff`
 --- uses. Each side is read straight off disk via a `path` Side.
+---
+--- Two directories are also how `git difftool --dir-diff` invokes a tool, so
+--- this is the path a difftool takes; see `_GITLINK_LINE` for what that means
+--- for the submodules in such a comparison.
 
 ---@param msg string
 ---@param level integer?
 local function _notify(msg, level)
     vim.notify("[gittools] " .. msg, level or vim.log.levels.INFO)
+end
+
+--- `git difftool --dir-diff` (`git difftool -d`) checks both sides out into
+--- temp trees and hands them to the tool as two directories -- which is how a
+--- difftool ends up here rather than in `gittools.diff`. A submodule cannot be
+--- checked out into such a tree, so git writes it as a plain one-line file
+--- holding the gitlink exactly as a patch would show it, with an all-zero id
+--- standing in for whichever side is the live working tree. That line is the
+--- only trace of the submodule in the temp trees, so it is what identifies one.
+local _GITLINK_LINE = "^Subproject commit (%x+)%s*$"
+
+--- The commit id of the gitlink stand-in at `path`, or nil if it is an ordinary
+--- file. Read at most once per side, and only for files small enough to be that
+--- single line in the first place.
+---@param path string?
+---@return string? sha  as written, so an all-zero id comes back as such
+local function _gitlink_sha(path)
+    if not path then return nil end
+    local st = vim.uv.fs_stat(path)
+    if not st or st.type ~= "file" or st.size > 80 then return nil end
+    local ok, lines = pcall(vim.fn.readfile, path, "", 2)
+    if not ok or #lines ~= 1 then return nil end
+    return lines[1]:match(_GITLINK_LINE)
+end
+
+---@param sha string?
+---@return string?  nil for the all-zero placeholder
+local function _real_sha(sha)
+    if not sha or sha:match("^0+$") then return nil end
+    return sha
 end
 
 --- One differing file between two paths, with the absolute on-disk path for
@@ -129,15 +163,38 @@ function M.diffpaths(a, b)
         } }
     end
 
+    -- The repo the tool was invoked from, which is where a gitlink stand-in
+    -- found in the temp trees has its real submodule: `git difftool` always runs
+    -- the tool from the top of the working tree, whichever directory the user
+    -- ran it in. Resolved once, and only if a gitlink actually turns up -- a
+    -- plain `:GitTool diffpaths` of two directories need not be in a repo at
+    -- all, and without one there is no submodule to descend into, so those rows
+    -- stay the ordinary files they look like.
+    local repo_root, repo_looked_up
+    local function _repo()
+        if not repo_looked_up then
+            repo_looked_up = true
+            repo_root = git.root(vim.uv.cwd() or ".")
+        end
+        return repo_root
+    end
+
     ---@type GitTools.DiffItem[]
     local items = {}
     for _, change in ipairs(changes) do
+        local left_sha  = _gitlink_sha(change.left_path)
+        local right_sha = _gitlink_sha(change.right_path)
+        local submodule = (left_sha or right_sha) ~= nil and _repo() ~= nil
         items[#items + 1] = {
             status    = change.status,
+            root      = submodule and _repo() or nil,
             left_rel  = change.left_rel,
             right_rel = change.right_rel,
             left      = { path = change.left_path },
             right     = { path = change.right_path },
+            submodule = submodule or nil,
+            left_sha  = submodule and _real_sha(left_sha) or nil,
+            right_sha = submodule and _real_sha(right_sha) or nil,
         }
     end
 

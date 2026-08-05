@@ -181,6 +181,15 @@ serve as your `git difftool`:
 Then `git difftool` opens each changed file in the layout, and `git difftool -d`
 (directory mode) opens the whole change set at once.
 
+Submodules survive that round trip. `git difftool -d` cannot check a submodule
+out into its temp trees, so it writes it as a one-line file holding the gitlink
+(`Subproject commit <sha>`, with an all-zero id standing in for whichever side
+is your working tree). gittools recognises those, resolves the submodule back to
+the real repository you ran the command in, and `c` on the row opens its diff in
+its own tab exactly as in `GitTool diff` -- against the commit the other side
+records, or against the submodule's live working tree where that is what the
+zeros mean.
+
 The `\"` escaping is required: git's config parser strips a plain `"..."` from
 the value, which would leave nvim running a bare `GitTool` (no subcommand, so it
 reports `Argument required`) and treating the paths as files to open. Escaping

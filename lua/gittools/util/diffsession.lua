@@ -425,8 +425,10 @@ local function _submodule_side_buf(session, data, rel, sha, side_label)
 
     if rel and not sha then
         -- The live worktree side records no sha in the parent: ask the
-        -- submodule itself what it is checked out at.
-        sha = git.run(data.root .. "/" .. rel, { "rev-parse", "HEAD" })
+        -- submodule itself what it is checked out at. Nothing comes back when it
+        -- isn't checked out, which leaves this side blank rather than showing
+        -- the enclosing repository's HEAD as if it were the submodule's.
+        sha = git.head_at(data.root .. "/" .. rel)
     end
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false,
