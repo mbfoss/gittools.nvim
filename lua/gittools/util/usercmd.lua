@@ -60,8 +60,15 @@ end
 ---@alias gittools.usercmd.run_fn
 ---| fun(cmd:string,args:string[],opts:vim.api.keyset.create_user_command.command_args)
 
+--- Completion for a command registered with `nargs = "*"`, to be called from
+--- inside the `complete` callback so that this module -- and whatever
+--- `subcommand_fn` closes over -- is only required once completion is first
+--- attempted.
+---@param arg_lead string
+---@param cmd_line string
 ---@param subcommand_fn gittools.usercmd.subcommand_fn
-local function _complete(subcommand_fn, arg_lead, cmd_line)
+---@return string[]
+function M.complete(arg_lead, cmd_line, subcommand_fn)
     local function filter(strs)
         local out = {}
         for _, s in ipairs(strs or {}) do
@@ -88,10 +95,14 @@ local function _complete(subcommand_fn, arg_lead, cmd_line)
     return {}
 end
 
----@param cmd string
----@param run_fn gittools.usercmd.run_fn
+--- Body of a command registered with `nargs = "*"`: splits `opts.args` and
+--- hands them to `run_fn`, reporting any error it raises as a notification
+--- rather than as a stack trace. Called from inside the command callback, so
+--- nothing here is loaded until the command is first run.
 ---@param opts vim.api.keyset.create_user_command.command_args
-local function _dispatch(cmd, run_fn, opts)
+---@param run_fn gittools.usercmd.run_fn
+function M.dispatch(opts, run_fn)
+    local cmd = opts.name
     local args = _split_args(opts.args)
     local ok, err = pcall(run_fn, cmd, args, opts)
     if not ok then
@@ -100,23 +111,6 @@ local function _dispatch(cmd, run_fn, opts)
             vim.log.levels.ERROR
         )
     end
-end
-
----@param cmd string
----@param run_fn gittools.usercmd.run_fn
----@param opts {desc:string?,subcommand_fn:gittools.usercmd.subcommand_fn?}?
-function M.register_user_cmd(cmd, run_fn, opts)
-    opts = opts or {}
-    vim.api.nvim_create_user_command(cmd, function(cmd_opts)
-            _dispatch(cmd, run_fn, cmd_opts)
-        end,
-        {
-            nargs = "*",
-            complete = opts.subcommand_fn ~= nil and function(arg_lead, cmd_line, _)
-                return _complete(opts.subcommand_fn, arg_lead, cmd_line)
-            end or function() return {} end,
-            desc = opts.desc,
-        })
 end
 
 return M
