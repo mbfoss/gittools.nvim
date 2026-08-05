@@ -15,7 +15,7 @@ local function _notify(msg, level)
     vim.notify("[gittools] " .. msg, level or vim.log.levels.INFO)
 end
 
---- Close the active diff session, if any (e.g. on VimLeavePre).
+--- Close every live diff session (e.g. on VimLeavePre).
 function M.clear_session()
     session.clear()
 end
@@ -74,26 +74,62 @@ end
 ---@field right_rel string? path on the right side; nil if the file was deleted
 ---@field status     "A"|"M"|"D"|"R"|"C"|"?" single-letter status, mirroring
 ---                   `git status --short` (`?` for untracked)
+---@field submodule boolean? the entry is a gitlink (a submodule), not a file
+---@field left_sha  string? object recorded on the left; nil when the side has
+---                  none of its own (an absent side, or the working tree)
+---@field right_sha string? object recorded on the right; as above
 
---- Parse `git diff --name-status -M` output into per-file change records,
---- keeping the old and new paths of a rename/copy distinct instead of
---- collapsing them into a single name.
+-- The mode git gives a gitlink, i.e. a submodule reference. Such an entry is
+-- not a file: its "content" is a commit id pointing into another repository.
+local _GITLINK_MODE = "160000"
+
+-- The well-known hash of git's empty tree, used as the left side when there is
+-- nothing to compare against (a submodule that was only just added).
+local _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+--- A sha field of `git diff --raw`, or nil when it is the all-zeros placeholder
+--- git prints for "no object here" -- a side the entry is absent from, or one
+--- that is the live working tree rather than a recorded object.
+---@param sha string?
+---@return string?
+local function _sha(sha)
+    if not sha or sha:match("^0+$") then return nil end
+    return sha
+end
+
+--- Parse `git diff --raw -M` output into per-file change records, keeping the
+--- old and new paths of a rename/copy distinct instead of collapsing them into
+--- a single name. `--raw` rather than `--name-status` for the two extra columns
+--- it carries: the file modes (which is how a submodule is recognised) and the
+--- object ids of each side (which is what a submodule's own diff is opened
+--- between).
+---
+--- Each line is `:<srcmode> <dstmode> <srcsha> <dstsha> <status>` followed by a
+--- tab and the path(s).
 ---@param out string?
 ---@return GitTools.Change[]
-local function _parse_name_status(out)
+local function _parse_raw(out)
     local changes = {}
     for _, line in ipairs(git.lines(out)) do
-        local parts  = vim.split(line, "\t", { plain = true })
-        local status = parts[1]:sub(1, 1)
+        local parts     = vim.split(line, "\t", { plain = true })
+        local meta      = vim.split(parts[1], " ", { trimempty = true })
+        local status    = (meta[5] or ""):sub(1, 1)
+        local common    = {
+            submodule = meta[1]:sub(2) == _GITLINK_MODE or meta[2] == _GITLINK_MODE,
+            left_sha  = _sha(meta[3]),
+            right_sha = _sha(meta[4]),
+        }
+        local change
         if status == "R" or status == "C" then
-            changes[#changes + 1] = { left_rel = parts[2], right_rel = parts[3], status = status }
+            change = { left_rel = parts[2], right_rel = parts[3], status = status }
         elseif status == "A" then
-            changes[#changes + 1] = { right_rel = parts[2], status = status }
+            change = { right_rel = parts[2], status = status }
         elseif status == "D" then
-            changes[#changes + 1] = { left_rel = parts[2], status = status }
+            change = { left_rel = parts[2], status = status }
         else
-            changes[#changes + 1] = { left_rel = parts[2], right_rel = parts[2], status = "M" }
+            change = { left_rel = parts[2], right_rel = parts[2], status = "M" }
         end
+        changes[#changes + 1] = vim.tbl_extend("error", change, common)
     end
     return changes
 end
@@ -138,13 +174,13 @@ local function _collect_changes(root, left, right, paths, cwd)
 
     local args, include_untracked
     if right.worktree then
-        args = { "diff", "--name-status", "-M" }
+        args = { "diff", "--raw", "--no-abbrev", "-M" }
         if left.rev then args[#args + 1] = left.rev end
         include_untracked = true
     elseif right.index then
-        args, include_untracked = { "diff", "--name-status", "-M", "--cached", left.rev }, false
+        args, include_untracked = { "diff", "--raw", "--no-abbrev", "-M", "--cached", left.rev }, false
     else
-        args, include_untracked = { "diff", "--name-status", "-M", left.rev, right.rev }, false
+        args, include_untracked = { "diff", "--raw", "--no-abbrev", "-M", left.rev, right.rev }, false
     end
     args = limited(args)
 
@@ -159,7 +195,7 @@ local function _collect_changes(root, left, right, paths, cwd)
         end
     end
 
-    for _, change in ipairs(_parse_name_status((git.run(runcwd, args)))) do add(change) end
+    for _, change in ipairs(_parse_raw((git.run(runcwd, args)))) do add(change) end
     if include_untracked then
         for _, rel in ipairs(git.lines((git.run(runcwd,
             limited({ "ls-files", "--others", "--exclude-standard", "--full-name" }))))) do
@@ -190,6 +226,31 @@ local function _collect_changes(root, left, right, paths, cwd)
         return (a.right_rel or a.left_rel) < (b.right_rel or b.left_rel)
     end)
     return changes
+end
+
+--- Hand `changes` to the diff-session engine as items comparing `left` against
+--- `right` in `root`.
+---@param root    string repo root
+---@param left    GitTools.Side
+---@param right   GitTools.Side
+---@param changes GitTools.Change[] non-empty
+local function _open_changes(root, left, right, changes)
+    ---@type GitTools.DiffItem[]
+    local items = {}
+    for _, change in ipairs(changes) do
+        items[#items + 1] = {
+            status    = change.status,
+            root      = root,
+            left_rel  = change.left_rel,
+            right_rel = change.right_rel,
+            left      = left,
+            right     = right,
+            submodule = change.submodule,
+            left_sha  = change.left_sha,
+            right_sha = change.right_sha,
+        }
+    end
+    session.open(items)
 end
 
 --- The set of paths (relative to the repo root) that differ between `left`
@@ -233,8 +294,9 @@ end
 --- side-by-side native diff. It opens with the cursor in the right (target)
 --- pane, showing the first changed file; `]f` / `[f` step through the rest from
 --- there. `<C-w>j` drops into the list, where `<CR>` shows the file under the
---- cursor (staying in the list, so the user can flip through files) and `q`
---- closes the session. Closing either split window or the file list ends the
+--- cursor (staying in the list, so the user can flip through files) and `d`, on
+--- a submodule row, opens a diff of the submodule itself in a further tab (see
+--- `M.diff_submodule`). Closing either split window or the file list ends the
 --- session and, with it, the tab it opened -- so the windows the diff was
 --- launched from are left exactly as they were.
 ---
@@ -289,20 +351,66 @@ function M.diff(opts)
         return
     end
 
-    ---@type GitTools.DiffItem[]
-    local items = {}
-    for _, change in ipairs(changes) do
-        items[#items + 1] = {
-            status    = change.status,
-            root      = root,
-            left_rel  = change.left_rel,
-            right_rel = change.right_rel,
-            left      = left,
-            right     = right,
-        }
+    _open_changes(root, left, right, changes)
+end
+
+--- Open a diff session over the submodule an entry of another diff session
+--- points at -- what `d` does on a gitlink row of the file list, where the
+--- parent's own diff is nothing but a pair of commit ids.
+---
+--- The submodule is diffed between the commits the two parent sides record, as
+--- a repository in its own right. Where the parent's right side is the working
+--- tree, so is the submodule's: that way a submodule dirtied by uncommitted
+--- edits (and not by a new commit, so the parent records no second id at all)
+--- still shows what actually changed.
+---
+--- Opens in a tab of its own, alongside the session it was launched from, which
+--- stays exactly as it was.
+---@param data GitTools.EntryData  the list entry's data, from the parent session
+function M.diff_submodule(data)
+    local rel = data.right_rel or data.left_rel
+    if not rel then return end
+
+    -- A submodule that was never initialized (or one just deleted) has no
+    -- repository on disk to diff -- `git.root` would climb out of the empty
+    -- directory and answer with the *parent* repo, so check what it returns.
+    local sub_root = vim.fs.normalize(data.root .. "/" .. rel)
+    local root = git.root(sub_root)
+    if not root or vim.fs.normalize(root) ~= sub_root then
+        _notify(("No checked-out repository at submodule '%s'"):format(rel), vim.log.levels.WARN)
+        return
     end
 
-    session.open(items)
+    --- One side of the submodule's own comparison, from the corresponding side
+    --- of the parent entry.
+    ---@param side GitTools.Side
+    ---@param sha  string?
+    ---@return GitTools.Side? side  nil when the commit is missing locally
+    local function _sub_side(side, sha)
+        if side.worktree then return { worktree = true } end
+        -- No recorded commit means the submodule is absent on this side (it was
+        -- added or removed): compare against nothing at all.
+        if not sha then return { rev = _EMPTY_TREE } end
+        if not git.verify_rev(root, sha) then
+            _notify(("Submodule '%s' has no commit %s; fetch it first"):format(rel, sha),
+                vim.log.levels.ERROR)
+            return nil
+        end
+        return { rev = sha }
+    end
+
+    local left = _sub_side(data.left, data.left_sha)
+    if not left then return end
+    local right = _sub_side(data.right, data.right_sha)
+    if not right then return end
+
+    local changes = _collect_changes(root, left, right)
+    if #changes == 0 then
+        _notify(("No changes in submodule '%s'"):format(rel))
+        return
+    end
+
+    _open_changes(root, left, right, changes)
 end
 
 return M

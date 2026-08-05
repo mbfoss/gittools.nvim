@@ -31,6 +31,10 @@ local ui         = require("gittools.util.ui")
 ---@field right_rel string?  relative path on the right; nil if absent (deleted)
 ---@field left      GitTools.Side  how to fetch left content
 ---@field right     GitTools.Side  how to fetch right content
+---@field submodule boolean? the entry is a gitlink (a submodule), not a file
+---@field left_sha  string?  submodule commit recorded on the left; nil when the
+---                           side records none (absent, or the live worktree)
+---@field right_sha string?  submodule commit recorded on the right; as above
 
 ---@class GitTools.EntryData
 ---@field root      string  absolute path to repo root
@@ -40,6 +44,9 @@ local ui         = require("gittools.util.ui")
 ---                          doesn't exist there (e.g. it was deleted)
 ---@field left  GitTools.Side   how to fetch left content
 ---@field right GitTools.Side   how to fetch right content
+---@field submodule boolean? the entry is a gitlink (a submodule), not a file
+---@field left_sha  string?  submodule commit recorded on the left side
+---@field right_sha string?  submodule commit recorded on the right side
 
 --- One row of the file list: a status letter, the (rename-aware) label shown
 --- for it, and the data needed to build its side-by-side diff.
@@ -58,6 +65,8 @@ local ui         = require("gittools.util.ui")
 ---@field group      integer   augroup id for this session's autocmds
 ---@field owns_tab   boolean   whether the session opened the tab it lives in,
 ---                            and so takes it down with it on teardown
+---@field tabpage    integer?  the tab the session lives in, which is what tells
+---                            sessions apart (see `_sessions`)
 ---@field left_win   integer?  window for the left (base/source) side
 ---@field right_win  integer?  window for the right (target/live) side
 ---@field list_buf   integer?  scratch buffer listing the changed files; nil for
@@ -70,10 +79,13 @@ local ui         = require("gittools.util.ui")
 ---@field shown_line integer?  list line whose diff is currently built, so a
 ---                            repeat setup for the same entry is a no-op
 
--- Only a single diff session exists at a time; opening a new diff tears down
--- the previous one (see M.open). nil when idle.
----@type GitTools.DiffSession?
-local _session   = nil
+-- Every live diff session. Sessions run in parallel, one per tab: each owns a
+-- whole tab (`ui.claim_tab` only ever reuses a blank one, so two sessions can
+-- never land in the same tab), which is how `_current_session` tells them
+-- apart. Opening a diff from inside a diff -- `<CR>` on a submodule -- is the
+-- reason there can be more than one.
+---@type GitTools.DiffSession[]
+local _sessions  = {}
 local _next_id   = 0
 
 -- Status letters (mirroring `git status --short`) rendered at the start of
@@ -204,7 +216,12 @@ local function _close_session(session)
     if session.closing then return end
     session.closing = true
 
-    if _session == session then _session = nil end
+    for i, other in ipairs(_sessions) do
+        if other == session then
+            table.remove(_sessions, i)
+            break
+        end
+    end
 
     -- Drop the autocmds before closing anything, so the window closes below
     -- don't re-trigger teardown through our own WinClosed hooks.
@@ -274,9 +291,23 @@ local function _close_session(session)
     session.buffers = {}
 end
 
---- Close the active diff session, if any (e.g. on VimLeavePre).
+--- The session living in the current tab, if any. Sessions are per-tab, so the
+--- tab the user is in is the one the global maps (`]f` / `[f`) act on.
+---@return GitTools.DiffSession?
+local function _current_session()
+    local tab = vim.api.nvim_get_current_tabpage()
+    for _, session in ipairs(_sessions) do
+        if session.tabpage == tab then return session end
+    end
+    return nil
+end
+
+--- Close every live diff session (e.g. on VimLeavePre). Iterates a copy, since
+--- each teardown removes its session from `_sessions`.
 function M.clear()
-    if _session then _close_session(_session) end
+    for _, session in ipairs(vim.list_slice(_sessions)) do
+        _close_session(session)
+    end
 end
 
 --- Create a read-only scratch buffer holding one side's content: an on-disk
@@ -374,6 +405,44 @@ local function _side_buf(session, root, side, rel, side_label, filetype)
     return buf
 end
 
+--- A read-only scratch buffer naming the commit one side of a submodule entry
+--- points at -- the same one-liner git's own diff shows for a gitlink, and all
+--- there is to compare at this level. The real content is a whole repository,
+--- which `<CR>` opens as a diff session of its own.
+---
+--- Needed because a submodule cannot go through `_side_buf`: its worktree
+--- "file" is a directory, and opening that as a buffer would drop netrw into
+--- the diff pane.
+---@param session GitTools.DiffSession
+---@param data GitTools.EntryData
+---@param rel  string? the submodule's path on this side; nil if absent
+---@param sha  string? the commit recorded on this side; nil for the worktree
+---                     (where it is read live) or an absent side
+---@param side_label string "left" or "right"
+---@return integer bufnr
+local function _submodule_side_buf(session, data, rel, sha, side_label)
+    local buf = vim.api.nvim_create_buf(false, true)
+
+    if rel and not sha then
+        -- The live worktree side records no sha in the parent: ask the
+        -- submodule itself what it is checked out at.
+        sha = git.run(data.root .. "/" .. rel, { "rev-parse", "HEAD" })
+    end
+
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false,
+        sha and { "Subproject commit " .. sha } or {})
+    vim.bo[buf].buftype    = "nofile"
+    vim.bo[buf].bufhidden  = "wipe"
+    vim.bo[buf].swapfile   = false
+    vim.bo[buf].modifiable = false
+    vim.bo[buf].modified   = false
+    vim.api.nvim_buf_set_name(buf,
+        string.format("git://%d/submodule/%s/%s", buf, side_label, rel or "(none)"))
+
+    table.insert(session.buffers, buf)
+    return buf
+end
+
 --- The entry (and its 1-based list line) under the cursor in the list window.
 ---@param session GitTools.DiffSession
 ---@return GitTools.DiffEntry? entry
@@ -412,8 +481,14 @@ local function _setup_diff(session, entry, lnum)
     local ud = entry.data
     local filetype = vim.filetype.match({ filename = ud.right_rel or ud.left_rel }) or ""
 
-    local right_buf = _side_buf(session, ud.root, ud.right, ud.right_rel, "right", filetype)
-    local left_buf  = _side_buf(session, ud.root, ud.left, ud.left_rel, "left", filetype)
+    local right_buf, left_buf
+    if ud.submodule then
+        right_buf = _submodule_side_buf(session, ud, ud.right_rel, ud.right_sha, "right")
+        left_buf  = _submodule_side_buf(session, ud, ud.left_rel, ud.left_sha, "left")
+    else
+        right_buf = _side_buf(session, ud.root, ud.right, ud.right_rel, "right", filetype)
+        left_buf  = _side_buf(session, ud.root, ud.left, ud.left_rel, "left", filetype)
+    end
 
     -- Turn diff mode off in each pane *while its current buffer is still shown*,
     -- before swapping in the next file. A pane can hold the user's real
@@ -452,23 +527,25 @@ local function _step(session, delta)
     if entry then _setup_diff(session, entry, target) end
 end
 
--- `[f` / `]f` step to the previous / next file of the active diff session, from
--- any window: either diff pane, the file list, or anywhere else. Global (set
--- once, at load) rather than buffer-local, so the motion works the moment a
--- diff is open without wiring maps onto each generated buffer -- and, since the
--- right pane can hold the user's real worktree-file buffer, without leaving
--- stray maps behind in it once the session closes.
+-- `[f` / `]f` step to the previous / next file of the diff session in the
+-- current tab, from any window in it: either diff pane, the file list, or
+-- anywhere else. Global (set once, at load) rather than buffer-local, so the
+-- motion works the moment a diff is open without wiring maps onto each
+-- generated buffer -- and, since the right pane can hold the user's real
+-- worktree-file buffer, without leaving stray maps behind in it once the
+-- session closes.
 --
--- Uppercase because the builtin `[c` / `]c` (previous/next *hunk* within the
--- current file's diff) has to keep working. A no-op when no session is open,
--- which is also why claiming these globally is cheap: only one diff session
--- exists at a time, and outside one the keys do nothing.
+-- `f` rather than `c` because the builtin `[c` / `]c` (previous/next *hunk*
+-- within the current file's diff) has to keep working. A no-op in a tab with no
+-- session, which is also why claiming these globally is cheap: outside a diff
+-- the keys do nothing.
 for _, map in ipairs({
     { lhs = "]f", delta = 1,  desc = "Show the next file's diff" },
     { lhs = "[f", delta = -1, desc = "Show the previous file's diff" },
 }) do
     vim.keymap.set("n", map.lhs, function()
-        if _session then _step(_session, map.delta) end
+        local session = _current_session()
+        if session then _step(session, map.delta) end
     end, { desc = "gittools: " .. map.desc })
 end
 
@@ -480,6 +557,7 @@ end
 ---@param session GitTools.DiffSession
 local function _build_layout(session)
     session.owns_tab = ui.claim_tab()
+    session.tabpage  = vim.api.nvim_get_current_tabpage()
     session.left_win = vim.api.nvim_get_current_win()
     vim.cmd("rightbelow vsplit")
     session.right_win = vim.api.nvim_get_current_win()
@@ -557,15 +635,34 @@ local function _open_list(session)
         if entry and lnum then _setup_diff(session, entry, lnum) end
     end
 
-    -- <CR> activates the file under the cursor: show its diff and step up into
-    -- the diff pane so the user can read/navigate it directly.
+    -- <CR> activates the entry under the cursor: show its diff and step up into
+    -- the diff pane so the user can read/navigate it directly. On a submodule
+    -- that is the pair of commit ids it points at, the same thing `]f` / `[f`
+    -- land on -- `d` is what descends into it.
     vim.keymap.set("n", "<CR>", function()
         show_at_cursor()
         local rw = session.right_win
         if rw and vim.api.nvim_win_is_valid(rw) then
             vim.api.nvim_set_current_win(rw)
         end
-    end, { buffer = buf, desc = "Open the diff for the file under the cursor" })
+    end, { buffer = buf, desc = "Open the diff for the entry under the cursor" })
+
+    -- `d` descends into the submodule under the cursor. A submodule's two sides
+    -- are only a pair of commit ids; what actually changed is a whole
+    -- repository, one level down. So this opens a second, independent diff
+    -- session over the submodule itself, in a tab of its own; this session stays
+    -- open behind it, and closing the submodule's tab lands the user back here.
+    vim.keymap.set("n", "d", function()
+        local entry = _entry_at_cursor(session)
+        if not entry then return end
+        if not entry.data.submodule then
+            vim.notify("[gittools] Not a submodule: " .. entry.label, vim.log.levels.WARN)
+            return
+        end
+        -- Lazy: gittools.diff requires this module, so requiring it at the top
+        -- would be a cycle.
+        require("gittools.diff").diff_submodule(entry.data)
+    end, { buffer = buf, desc = "Diff the submodule under the cursor in its own tab" })
 end
 
 ---@class GitTools.DiffOpts
@@ -577,9 +674,9 @@ end
 --- Open a diff session over `items`: build the side-by-side layout, the driving
 --- file list, and show the first item up front (so the layout opens on a real
 --- diff rather than empty panes; the user flips through the rest with `<CR>` /
---- `]f` / `[f`). Tears down any existing session first -- done here, after the
---- caller's early returns, so an invalid or empty request leaves the current
---- session intact. Callers must pass a non-empty list.
+--- `]f` / `[f`). Sessions are independent and live side by side, each in its own
+--- tab, so opening one leaves any other untouched. Callers must pass a
+--- non-empty list.
 ---@param items GitTools.DiffItem[]
 ---@param opts GitTools.DiffOpts?
 function M.open(items, opts)
@@ -596,6 +693,9 @@ function M.open(items, opts)
                 right_rel = item.right_rel,
                 left      = item.left,
                 right     = item.right,
+                submodule = item.submodule,
+                left_sha  = item.left_sha,
+                right_sha = item.right_sha,
             },
         }
     end
@@ -605,6 +705,7 @@ function M.open(items, opts)
     local session = {
         group      = vim.api.nvim_create_augroup("gittools.diff." .. _next_id, { clear = true }),
         owns_tab   = false,
+        tabpage    = nil,
         left_win   = nil,
         right_win  = nil,
         list_buf   = nil,
@@ -615,8 +716,7 @@ function M.open(items, opts)
         setting_up = false,
         shown_line = nil,
     }
-    if _session then _close_session(_session) end
-    _session = session
+    _sessions[#_sessions + 1] = session
 
     _build_layout(session)
 

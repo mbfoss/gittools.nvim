@@ -52,6 +52,18 @@ Untracked files show up whenever the working tree is the right-hand side, and so
 do files you have edited but not yet written, diffed straight from the buffer.
 Pathspecs filter both.
 
+A changed submodule is listed like anything else, and `<CR>` shows it the way
+git does, as the pair of commit ids it points at. What actually changed, though,
+is a whole repository one level down, so `d` on a submodule row opens a *second*
+diff over the submodule itself, in a tab of its own: the same file list and
+side-by-side layout, between
+the commits the parent records (or against the submodule's own working tree,
+when that is what the parent is being compared against, so uncommitted edits
+inside it show too). The session you launched from stays open behind it, and
+closing the submodule's tab puts you back in it. Diff sessions are independent
+that way in general -- each lives in its own tab, and `]f` / `[f` step through
+the file list of whichever one you're in.
+
 ## `GitTool log` and `GitTool graph`
 
 Both open the history in a tab of its own, one commit per line, and both take an
