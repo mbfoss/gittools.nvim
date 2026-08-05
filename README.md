@@ -54,7 +54,7 @@ Pathspecs filter both.
 
 A changed submodule is listed like anything else, and `<CR>` shows it the way
 git does, as the pair of commit ids it points at. What actually changed, though,
-is a whole repository one level down, so `d` on a submodule row opens a *second*
+is a whole repository one level down, so `c` on a submodule row opens a *second*
 diff over the submodule itself, in a tab of its own: the same file list and
 side-by-side layout, between
 the commits the parent records (or against the submodule's own working tree,
@@ -96,12 +96,27 @@ it, since the layout needs children before parents. Anything git doesn't
 recognise comes back as git's own error.
 
 In either view `<CR>` diffs the commit under the cursor against its first
-parent (a root commit against the empty tree), `c` flags a commit -- and if
-another one was already flagged, diffs the two straight away -- `K` shows the
-commit's details (header, message and diffstat) in a float, and `q` closes
-the view. `GitTool stashlist` is the same view over `git stash list`, with each
-entry labelled by the `stash@{N}` selector you would type at `git stash
+parent (a root commit against the empty tree), `K` shows the commit's details
+(header, message and diffstat) in a float, and `q` closes the view.
+`GitTool stashlist` is the same view over `git stash list`, with each entry
+labelled by the `stash@{N}` selector you would type at `git stash
 apply/pop/drop`.
+
+`c` marks the commit under the cursor as the comparison base, drawn with a `»`
+in front of it:
+
+```
+●   4bebd0e 2025-06-13 Ren  (HEAD -> main) Merge pull request #40 from feat/toggle
+● » 1f0a2c9 2025-06-11 Ren  Add the toggle
+●   9d3e871 2025-06-10 Ren  Tidy up the option table
+```
+
+From then on `<CR>` diffs against that commit instead of against parents, so you
+can walk the list and compare anything you land on with the same base. Only one
+commit is ever marked: `c` elsewhere moves the mark, and `c` on the marked
+commit clears it, putting `<CR>` back to parent diffs. (`<CR>` on the marked
+commit itself would compare it with itself, so that one still diffs against its
+parent.)
 
 The history stays open behind the diffs it launches: the diff gets a tab of its
 own, so `q` there lands you back on the same commit, ready to open the next one.
@@ -134,7 +149,8 @@ bottom.
 ### Highlights
 
 The rail colours are `GitToolsGraph1` through `GitToolsGraph6`, cycled by
-column. They link to sensible defaults and can be overridden by a colorscheme.
+column, and the comparison-base marker is `GitToolsLogMark`. They link to
+sensible defaults and can be overridden by a colorscheme.
 
 ## `GitTool diffpaths`
 

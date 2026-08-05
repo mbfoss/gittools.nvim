@@ -638,7 +638,7 @@ local function _open_list(session)
     -- <CR> activates the entry under the cursor: show its diff and step up into
     -- the diff pane so the user can read/navigate it directly. On a submodule
     -- that is the pair of commit ids it points at, the same thing `]f` / `[f`
-    -- land on -- `d` is what descends into it.
+    -- land on -- `c` is what descends into it.
     vim.keymap.set("n", "<CR>", function()
         show_at_cursor()
         local rw = session.right_win
@@ -647,12 +647,13 @@ local function _open_list(session)
         end
     end, { buffer = buf, desc = "Open the diff for the entry under the cursor" })
 
-    -- `d` descends into the submodule under the cursor. A submodule's two sides
-    -- are only a pair of commit ids; what actually changed is a whole
-    -- repository, one level down. So this opens a second, independent diff
-    -- session over the submodule itself, in a tab of its own; this session stays
-    -- open behind it, and closing the submodule's tab lands the user back here.
-    vim.keymap.set("n", "d", function()
+    -- `c` compares the submodule under the cursor, descending into it. A
+    -- submodule's two sides are only a pair of commit ids; what actually changed
+    -- is a whole repository, one level down. So this opens a second, independent
+    -- diff session over the submodule itself, in a tab of its own; this session
+    -- stays open behind it, and closing the submodule's tab lands the user back
+    -- here. `c` for "compare", as in the log/graph views.
+    vim.keymap.set("n", "c", function()
         local entry = _entry_at_cursor(session)
         if not entry then return end
         if not entry.data.submodule then
@@ -662,7 +663,7 @@ local function _open_list(session)
         -- Lazy: gittools.diff requires this module, so requiring it at the top
         -- would be a cycle.
         require("gittools.diff").diff_submodule(entry.data)
-    end, { buffer = buf, desc = "Diff the submodule under the cursor in its own tab" })
+    end, { buffer = buf, desc = "Compare the submodule under the cursor in its own tab" })
 end
 
 ---@class GitTools.DiffOpts

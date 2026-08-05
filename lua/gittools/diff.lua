@@ -294,7 +294,7 @@ end
 --- side-by-side native diff. It opens with the cursor in the right (target)
 --- pane, showing the first changed file; `]f` / `[f` step through the rest from
 --- there. `<C-w>j` drops into the list, where `<CR>` shows the file under the
---- cursor (staying in the list, so the user can flip through files) and `d`, on
+--- cursor (staying in the list, so the user can flip through files) and `c`, on
 --- a submodule row, opens a diff of the submodule itself in a further tab (see
 --- `M.diff_submodule`). Closing either split window or the file list ends the
 --- session and, with it, the tab it opened -- so the windows the diff was
@@ -355,7 +355,7 @@ function M.diff(opts)
 end
 
 --- Open a diff session over the submodule an entry of another diff session
---- points at -- what `d` does on a gitlink row of the file list, where the
+--- points at -- what `c` does on a gitlink row of the file list, where the
 --- parent's own diff is nothing but a pair of commit ids.
 ---
 --- The submodule is diffed between the commits the two parent sides record, as

@@ -16,11 +16,12 @@ local hover    = require("gittools.util.hover")
 --- handed to git as given. `:GitTool stash_log` -- the stash list (`git stash
 --- list`) in the same kind of view, each entry labeled with its `stash@{N}`
 --- selector instead of a hash. In all three views `<CR>` diffs the commit under
---- the cursor against its first parent; `c` flags a commit, and if another
---- commit was already flagged, immediately diffs the two (via `gittools.diff`);
---- `K` shows the commit's details -- header, message and diffstat -- in a
---- float. The diff opens in its own tab and the list stays put behind it, so `q` on
---- the diff comes back to the same place in the history.
+--- the cursor against the marked comparison base, or -- with nothing marked --
+--- against its first parent (via `gittools.diff`); `c` marks the commit under
+--- the cursor as that base, one at a time, shown in the list with a `»`; `K`
+--- shows the commit's details -- header, message and diffstat -- in a float. The
+--- diff opens in its own tab and the list stays put behind it, so `q` on the
+--- diff comes back to the same place in the history.
 
 local _LIMIT      = 500
 local _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -49,7 +50,8 @@ end
 ---@field root    string
 ---@field buf     integer?
 ---@field win     integer?
----@field flagged string?
+---@field marked  string?  hash of the commit marked as the comparison base, the
+---                        left side `<CR>` diffs against; only ever one
 ---@field entries GitTools.LogEntry[]           by buffer line
 ---@field line_of table<string, integer>        hash -> buffer line
 ---@type GitTools.LogSession?
@@ -342,6 +344,13 @@ local function _build_entry(e)
     return chunks
 end
 
+--- The marker drawn in front of the commit marked as the comparison base. Every
+--- commit line reserves the same two cells for it, blank when unmarked, so
+--- marking and unmarking never shifts the text sideways.
+local _MARK = "» "
+
+vim.api.nvim_set_hl(0, "GitToolsLogMark", { link = "WarningMsg", default = true })
+
 --- The `{text, hl}` chunks making up one buffer line.
 ---@param session GitTools.LogSession
 ---@param entry   GitTools.LogEntry
@@ -352,9 +361,8 @@ local function _entry_chunks(session, entry)
         chunks[#chunks + 1] = chunk
     end
     if entry.hash then
-        if session.flagged == entry.hash then
-            chunks[#chunks + 1] = { "» ", "WarningMsg" }
-        end
+        local marked = session.marked == entry.hash
+        chunks[#chunks + 1] = { marked and _MARK or "  ", marked and "GitToolsLogMark" or "Normal" }
         for _, chunk in ipairs(_build_entry(entry)) do
             chunks[#chunks + 1] = chunk
         end
@@ -408,14 +416,20 @@ local function _entry_at_cursor(session)
     return (entry and entry.hash) and entry or nil
 end
 
---- Diff `entry` against its first parent (or the empty tree, for a root
---- commit) -- i.e. show what that commit itself changed. The log stays open:
---- the diff takes a tab of its own, so closing it drops the user straight back
---- here to pick the next commit.
+--- Diff `entry` against the marked comparison base, or -- with nothing marked,
+--- or with the mark sitting on `entry` itself, where the comparison would be
+--- empty -- against its first parent (the empty tree, for a root commit), i.e.
+--- what that commit alone changed. The log stays open: the diff takes a tab of
+--- its own, so closing it drops the user straight back here to pick the next
+--- commit.
 ---@param session GitTools.LogSession
 ---@param entry   GitTools.LogEntry
-local function _diff_against_parent(session, entry)
+local function _diff_entry(session, entry)
     local root = session.root
+    if session.marked and session.marked ~= entry.hash then
+        difftool.diff({ revs = { session.marked, entry.hash }, root = root })
+        return
+    end
     local parent = entry.parents[1]
     if parent and git.verify_rev(root, parent) then
         difftool.diff({ revs = { parent, entry.hash }, root = root })
@@ -476,24 +490,21 @@ local function _show(session)
     vim.keymap.set("n", "<CR>", function()
         local entry = _entry_at_cursor(session)
         if not entry then return end
-        _diff_against_parent(session, entry)
-    end, { buffer = buf, desc = "Diff commit against its parent" })
+        _diff_entry(session, entry)
+    end, { buffer = buf, desc = "Diff commit against the marked base, or its parent" })
 
+    -- `c` marks the commit under the cursor as the comparison base, which is
+    -- what `<CR>` then diffs every other commit against. Only one mark exists at
+    -- a time: marking elsewhere moves it, and marking the marked commit again
+    -- clears it (a toggle), putting `<CR>` back to diffing against parents.
     vim.keymap.set("n", "c", function()
         local entry = _entry_at_cursor(session)
         if not entry then return end
-        local old = session.flagged
-        -- Re-flagging the same commit clears the flag (toggle).
-        session.flagged = old ~= entry.hash and entry.hash or nil
+        local old = session.marked
+        session.marked = old ~= entry.hash and entry.hash or nil
         if old then _render(session, session.line_of[old]) end
-        if session.flagged then _render(session, session.line_of[session.flagged]) end
-        -- A different commit was already flagged: diff it against the one
-        -- just flagged. The log stays open (in its own tab) with the new flag
-        -- set, so the next `c` picks up from there.
-        if old and old ~= entry.hash then
-            difftool.diff({ revs = { old, entry.hash }, root = session.root })
-        end
-    end, { buffer = buf, desc = "Flag commit, diffing against the previous flag if any" })
+        if session.marked then _render(session, session.line_of[session.marked]) end
+    end, { buffer = buf, desc = "Mark commit as the comparison base (toggle)" })
 
     vim.keymap.set("n", "K", function()
         local entry = _entry_at_cursor(session)
@@ -608,7 +619,7 @@ local function _run_log(opts, extra_args, parse, reverse)
         if entry.hash then line_of[entry.hash] = i end
     end
 
-    _show({ root = root, flagged = nil, entries = entries, line_of = line_of })
+    _show({ root = root, marked = nil, entries = entries, line_of = line_of })
 end
 
 --- List commit history in an interactive tab of its own, starting from
@@ -671,12 +682,12 @@ local function _run_stash_log()
         line_of[entry.hash] = i
     end
 
-    _show({ root = root, flagged = nil, entries = entries, line_of = line_of })
+    _show({ root = root, marked = nil, entries = entries, line_of = line_of })
 end
 
 --- List stashes in an interactive tab of its own, same interaction as `M.log`
---- (flag/diff/close) -- mirrors `git stash list`. Diffing a stash
---- (with nothing flagged) compares it against its first parent, i.e. the
+--- (mark/diff/close) -- mirrors `git stash list`. Diffing a stash
+--- (with nothing marked) compares it against its first parent, i.e. the
 --- commit that was checked out when it was stashed -- the tracked changes it
 --- holds. A stash created with `git stash push -u` also carries untracked
 --- files in a second parent that this diff doesn't show.
