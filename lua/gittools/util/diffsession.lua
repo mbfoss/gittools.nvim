@@ -558,6 +558,9 @@ end
 --- once registered, the file list) tears the session down.
 ---@param session GitTools.DiffSession
 local function _build_layout(session)
+    -- Every autocmd below is registered into the session's group, which is what
+    -- teardown deletes them by; a nil one would silently make them global.
+    assert(session.group, "diff session has no augroup")
     session.owns_tab = ui.claim_tab()
     session.tabpage  = vim.api.nvim_get_current_tabpage()
     session.left_win = vim.api.nvim_get_current_win()
@@ -573,6 +576,22 @@ local function _build_layout(session)
             callback = function() vim.schedule(function() _close_session(session) end) end,
         })
     end
+
+    -- Navigating a pane away by hand (`<C-o>`, `:b`) hides a still-diff'ed
+    -- buffer, which keeps that flag for good (`diffoff` on the window no longer
+    -- reaches it). BufWinLeave fires while it is still shown -- clear it there.
+    vim.api.nvim_create_autocmd("BufWinLeave", {
+        group    = session.group,
+        callback = function(args)
+            if session.setting_up or session.closing then return end
+            for _, win in ipairs({ session.left_win, session.right_win }) do
+                if win and vim.api.nvim_win_is_valid(win)
+                    and vim.api.nvim_win_get_buf(win) == args.buf then
+                    vim.api.nvim_win_call(win, function() vim.cmd("diffoff") end)
+                end
+            end
+        end,
+    })
 end
 
 --- Render `session.entries` into a fresh scratch buffer.
