@@ -80,13 +80,13 @@ The layout is a file list in a bottom split driving a side-by-side diff:
 | --- | --- |
 | `<CR>` | show the file under the cursor and jump into the diff |
 | `]f` / `[f` | show the next / previous file, from anywhere in the tab |
-| `c` | on a submodule row, open the submodule's own diff in a new tab |
+| `o` | on a submodule row, open the submodule's own diff in a new tab |
 
 `]f` / `[f` step through the file list of the session in the current tab, so two
 diffs open at once stay independent.
 
 A changed submodule is listed like any other entry, and `<CR>` shows it as the
-pair of commit ids it points at, as git does. `c` on a submodule row opens a
+pair of commit ids it points at, as git does. `o` on a submodule row opens a
 second diff over the submodule itself, in a tab of its own, with the same file
 list and side-by-side layout: between the commits the parent records, or against
 the submodule's own working tree when that is what the parent is being compared
@@ -228,7 +228,7 @@ be used as `git difftool`:
 
 Then `git difftool` opens each changed file in the layout, and `git difftool -d`
 (directory mode) opens the whole change set at once. Submodules are handled
-there too: they are listed as rows like any other change, and `c` opens the
+there too: they are listed as rows like any other change, and `o` opens the
 submodule's own diff in its own tab, as in `GitTool diff`.
 
 The `\"` escaping is required: git's config parser strips a plain `"..."` from

@@ -668,13 +668,13 @@ local function _open_list(session)
         end
     end, { buffer = buf, desc = "Open the diff for the entry under the cursor" })
 
-    -- `c` compares the submodule under the cursor, descending into it. A
+    -- `o` opens the submodule under the cursor, descending into it. A
     -- submodule's two sides are only a pair of commit ids; what actually changed
     -- is a whole repository, one level down. So this opens a second, independent
     -- diff session over the submodule itself, in a tab of its own; this session
     -- stays open behind it, and closing the submodule's tab lands the user back
-    -- here. `c` for "compare", as in the log/graph views.
-    vim.keymap.set("n", "c", function()
+    -- here. `o` for "open".
+    vim.keymap.set("n", "o", function()
         local entry = _entry_at_cursor(session)
         if not entry then return end
         if not entry.data.submodule then
