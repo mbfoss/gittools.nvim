@@ -108,15 +108,15 @@ the index; pass a revision to compare against that instead:
 The git side is a read-only scratch buffer on the left; the live buffer is on
 the right, so the diff tracks edits as you type.
 
-## `GitTool log` and `GitTool graph`
+## `GitTool log`
 
-Both open the history in a tab of its own, one commit per line, and both take an
+Opens the history in a tab of its own, one commit per line, and takes an
 optional revision to start from and an optional path to scope to:
 
 ```vim
 :GitTool log                      " history from HEAD
-:GitTool graph v1.2.0             " ...starting at a tag
-:GitTool graph -- lua/gittools    " ...only commits touching a path
+:GitTool log v1.2.0               " ...starting at a tag
+:GitTool log -- lua/gittools      " ...only commits touching a path
 :GitTool log lua/gittools/log.lua " the `--` is optional when it's unambiguous
 ```
 
@@ -130,7 +130,7 @@ or when it is neither, such as a wildcard:
 ```vim
 :GitTool log assets --            " the branch
 :GitTool log -- assets            " the directory
-:GitTool graph -- lua/*.lua       " a pathspec, which names no file on disk
+:GitTool log -- lua/*.lua         " a pathspec, which names no file on disk
 ```
 
 A name that is both, given on its own, is read as the revision.
@@ -139,9 +139,9 @@ Anything else starting with `-` is a `git log` option, handed to git as written,
 so the usual revision selection and filtering applies:
 
 ```vim
-:GitTool graph --all              " every branch, tag and remote, not just HEAD
-:GitTool graph --branches --remotes --no-merges
-:GitTool graph --all -n 2000      " raise the 500-commit default cap
+:GitTool log --all                " every branch, tag and remote, not just HEAD
+:GitTool log --branches --remotes --no-merges
+:GitTool log --all -n 2000        " raise the 500-commit default cap
 :GitTool log --author=Ren --since=2.weeks main..dev -- lua/
 ```
 
@@ -151,8 +151,8 @@ Completion offers the common ones (`--all`, `--branches`, `--remotes`,
 before and after a `--`. Options that replace
 the one-line-per-commit output -- `--pretty`, `--format`, `--oneline`, `--stat`,
 `--patch`, `--name-status`, `-z` and similar -- are rejected with a message, as
-is `--graph` (gittools draws the rails). `--reverse` works in `log`; `graph`
-rejects it. Anything git doesn't recognise comes back as git's own error.
+is `--graph` (gittools draws the rails). Anything git doesn't recognise comes
+back as git's own error.
 
 | key | action |
 | --- | --- |
@@ -181,26 +181,7 @@ compare it with itself, so that one still diffs against its parent.)
 The diff opens in a tab of its own and the history stays open, so closing the
 diff returns you to the same commit in the list.
 
-`graph` adds the commit tree in front of each commit and the ref names after the
-author, in box-drawing glyphs, each rail coloured by the column it occupies:
-
-```
-◆   4bebd0e 2025-06-13 Ren  (HEAD -> main) Merge pull request #40 from feat/toggle
-├─╮
-│ ● e1817e2 2025-06-13 Ren  feat: add ClaudeCodeFocus command
-├─╯
-●   21f984b 2025-06-13 Ren  fix: native terminal window flags
-```
-
-`●` is an ordinary commit and `◆` one with more than one parent. A branch curves
-out below the merge commit that brought it in and curves back into the commit
-where it forked, so a rail spans exactly the commits that are on it.
-
-Commits come out in topological order, as with `git log --graph`, so a branch's
-commits appear in one unbroken run rather than interleaved by date. Scoping to a
-path still joins the rails up across the commits the path filter dropped. Either
-view loads at most 500 commits unless you pass an `-n`/`--max-count`; rails
-whose next commit falls past that limit run off the bottom.
+The view loads at most 500 commits unless you pass an `-n`/`--max-count`.
 
 The buffer is named after what it is showing -- `gittools://log/HEAD`,
 `gittools://graph/v1.2.0:lua/gittools`, `gittools://stashlist` -- so the
@@ -227,6 +208,40 @@ git logtool --author=Ren main..dev -- lua/
 
 Git runs `!` aliases from the top of the worktree, so a path argument is
 resolved from there rather than from the directory you are in.
+
+## `GitTool graph`
+
+The same view as `GitTool log` -- same arguments, same `git log` options, same
+keys -- with the commit tree drawn in front of each commit and the ref names
+after the author, in box-drawing glyphs, each rail coloured by the column it
+occupies:
+
+```vim
+:GitTool graph                    " history from HEAD, with the rails
+:GitTool graph v1.2.0             " ...starting at a tag
+:GitTool graph --all              " every branch, tag and remote, not just HEAD
+:GitTool graph --all -n 2000      " raise the 500-commit default cap
+:GitTool graph -- lua/*.lua       " a pathspec, which names no file on disk
+```
+
+```
+◆   4bebd0e 2025-06-13 Ren  (HEAD -> main) Merge pull request #40 from feat/toggle
+├─╮
+│ ● e1817e2 2025-06-13 Ren  feat: add ClaudeCodeFocus command
+├─╯
+●   21f984b 2025-06-13 Ren  fix: native terminal window flags
+```
+
+`●` is an ordinary commit and `◆` one with more than one parent. A branch curves
+out below the merge commit that brought it in and curves back into the commit
+where it forked, so a rail spans exactly the commits that are on it.
+
+Commits come out in topological order, as with `git log --graph`, so a branch's
+commits appear in one unbroken run rather than interleaved by date. Scoping to a
+path still joins the rails up across the commits the path filter dropped. Rails
+whose next commit falls past the 500-commit cap run off the bottom.
+
+`--reverse` works in `log`; `graph` rejects it, as it does `--graph` itself.
 
 ## `GitTool blame`
 

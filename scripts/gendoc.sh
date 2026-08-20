@@ -57,14 +57,21 @@ if [ -z "${PANVIMDOC_DIR:-}" ]; then
     }
 fi
 
+# panvimdoc names each section -- and its tag -- after the README heading, so
+# `## `GitTool diff`` would become the tag `gittools-gittool-diff`. Drop the
+# `GitTool ` prefix inside headings only, on the copy panvimdoc reads: the
+# README keeps its descriptive section names, the help file gets short ones
+# (`gittools-diff`). Nothing else in the README is touched.
+mkdir -p "$work/doc"
+sed -E '/^#{1,6} /s/`GitTool /`/g' "$root/README.md" >"$work/README.md"
+
 # panvimdoc writes to doc/<project>.txt relative to the working directory, so
 # run it in a scratch tree and compare from there.
-mkdir -p "$work/doc"
 (
     cd "$work"
     sh "$panvimdoc/panvimdoc.sh" \
         --project-name "$project" \
-        --input-file "$root/README.md" \
+        --input-file "$work/README.md" \
         --vim-version "$vimversion" \
         --description "$description" \
         --toc true \

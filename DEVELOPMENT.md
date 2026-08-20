@@ -241,6 +241,14 @@ for someone who drops the repo into `pack/*/opt` and runs `packadd`. Plugin
 managers -- including `vim.pack` -- delete and regenerate it on install and
 update, so the committed copy costs them nothing.
 
+Section names come from the README headings, and so do the tags, so
+`## \`GitTool diff\`` would give `*gittools-gittool-diff*`. panvimdoc has no
+override for that (`--doc-mapping` only tags `####` headings), so `gendoc.sh`
+strips the `GitTool ` prefix inside headings on the *copy* it feeds panvimdoc:
+the README keeps its descriptive section names, the help file gets
+`*gittools-diff*`. Nothing else in the README is rewritten, and the README
+itself is never modified.
+
 Options passed to panvimdoc:
 
 - `--shift-heading-level-by -1` so the README's `#` title drops out and `##`
