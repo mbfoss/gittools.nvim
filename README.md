@@ -123,7 +123,16 @@ As on `git log`'s own command line, the `--` can be left out: a positional that
 names a revision is taken as one, and one that names an existing file or
 directory as the path. An argument that is neither is rejected rather than
 quietly scoping the log to something that can never match, so `--` is only
-needed when a name is both (or when it is neither, such as a wildcard).
+needed when a name is both -- a branch and a directory both called `assets` --
+or when it is neither, such as a wildcard:
+
+```vim
+:GitTool log assets --            " the branch
+:GitTool log -- assets            " the directory
+:GitTool graph -- lua/*.lua       " a pathspec, which names no file on disk
+```
+
+A name that is both, given on its own, is read as the revision.
 
 Anything else starting with `-` is a `git log` option, handed to git as written,
 so the usual revision selection and filtering applies:
@@ -137,7 +146,8 @@ so the usual revision selection and filtering applies:
 
 Completion offers the common ones (`--all`, `--branches`, `--remotes`,
 `--tags`, `--first-parent`, `--merges`, `--no-merges`, `--author=`, `--grep=`,
-`--since=`, `--until=`, `-n`, ...) alongside the ref names. Options that replace
+`--since=`, `--until=`, `-n`, ...) alongside the ref names and paths, both
+before and after a `--`. Options that replace
 the one-line-per-commit output -- `--pretty`, `--format`, `--oneline`, `--stat`,
 `--patch`, `--name-status`, `-z` and similar -- are rejected with a message, as
 is `--graph` (gittools draws the rails). `--reverse` works in `log`; `graph`
@@ -190,6 +200,10 @@ commits appear in one unbroken run rather than interleaved by date. Scoping to a
 path still joins the rails up across the commits the path filter dropped. Either
 view loads at most 500 commits unless you pass an `-n`/`--max-count`; rails
 whose next commit falls past that limit run off the bottom.
+
+The buffer is named after what it is showing -- `gittools://log/HEAD`,
+`gittools://graph/v1.2.0:lua/gittools`, `gittools://stashlist` -- so the
+tabline says which history a tab holds.
 
 Either view can be opened straight from the command line with a git alias by defining the alias in your git config.
 

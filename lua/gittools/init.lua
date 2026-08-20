@@ -245,6 +245,10 @@ function M.complete(_, rest, arg_lead)
         vim.list_extend(out, _LOG_OPTS)
         if sub == "log" then out[#out + 1] = "--reverse" end
         vim.list_extend(out, git.refs())
+        -- The path can be given without a `--` (`gittools.log` tells the two
+        -- apart), so files belong here alongside the refs rather than only
+        -- after a separator.
+        vim.list_extend(out, vim.fn.getcompletion(arg_lead, "file"))
         return out
     end
     return {}

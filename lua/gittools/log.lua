@@ -48,6 +48,8 @@ end
 
 ---@class GitTools.LogSession
 ---@field root    string
+---@field label   string   what the view is showing, as a buffer name suffix
+---                        (`log/HEAD`, `graph/v1.2.0:lua`, `stashlist`)
 ---@field buf     integer?
 ---@field win     integer?
 ---@field marked  string?  hash of the commit marked as the comparison base, the
@@ -468,6 +470,11 @@ local function _show(session)
         if _session == session then _session = nil end
     end)
     session.buf = buf
+    -- Name the buffer after what it is showing, so the tabline and the
+    -- statusline say which history this is rather than "[Scratch]". Only one
+    -- log view exists at a time (`_end_log` above closed any other), so the
+    -- name can't collide; `pcall` covers the case where one lingers anyway.
+    pcall(vim.api.nvim_buf_set_name, buf, "gittools://" .. session.label)
     _render(session)
 
     ui.claim_tab()
@@ -650,10 +657,13 @@ local function _run_log(name, opts, extra_args, parse, reverse)
     vim.list_extend(args, extra_args)
     vim.list_extend(args, opts.args or {})
     if rev then args[#args + 1] = rev end
-    if rel then
-        args[#args + 1] = "--"
-        args[#args + 1] = rel
-    end
+    -- The `--` goes in even with no path behind it. Which of the two a
+    -- positional was has already been decided here, and the separator is what
+    -- tells git to stop deciding it again: without it, a `rev` that also names
+    -- a file on disk (a branch and a directory both called `assets`) comes
+    -- back as git's own "ambiguous argument" rather than as its history.
+    args[#args + 1] = "--"
+    if rel then args[#args + 1] = rel end
 
     local out, err = git.run(root, args)
     if not out then
@@ -672,7 +682,14 @@ local function _run_log(name, opts, extra_args, parse, reverse)
         if entry.hash then line_of[entry.hash] = i end
     end
 
-    _show({ root = root, marked = nil, entries = entries, line_of = line_of })
+    _show({
+        root = root,
+        -- `rev:path`, as git spells the same pair on its own command line.
+        label = name .. "/" .. (rev or "HEAD") .. (rel and (":" .. rel) or ""),
+        marked = nil,
+        entries = entries,
+        line_of = line_of,
+    })
 end
 
 --- List commit history in an interactive tab of its own, starting from
@@ -735,7 +752,7 @@ local function _run_stash_log()
         line_of[entry.hash] = i
     end
 
-    _show({ root = root, marked = nil, entries = entries, line_of = line_of })
+    _show({ root = root, label = "stashlist", marked = nil, entries = entries, line_of = line_of })
 end
 
 --- List stashes in an interactive tab of its own, same interaction as `M.log`
