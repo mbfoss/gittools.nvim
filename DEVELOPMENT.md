@@ -216,6 +216,45 @@ Every group is defined with `default = true` so a colorscheme wins.
 - The rename arrow is `→` (U+2192) rather than a Nerd Font glyph, so no patched
   font is needed.
 
+## Help file
+
+`doc/gittools.txt` is generated from `README.md`; edit the README, never the
+help file. Regenerate with
+
+```sh
+scripts/gendoc.sh          # rewrites doc/gittools.txt and doc/tags
+scripts/gendoc.sh --check  # exits 1 when the help file is stale
+```
+
+The generator is [panvimdoc](https://github.com/kdheepak/panvimdoc), pinned in
+`scripts/gendoc.sh` to commit `662fb20` (v4.0.1) -- a tag can be moved, a commit
+cannot, so the same README always produces the same help file. It is fetched
+into `$XDG_CACHE_HOME/panvimdoc-<commit>` on first run and reused after that;
+the script re-checks the cached checkout's HEAD and refuses to run if it is not
+the pinned commit. Set `PANVIMDOC_DIR` to use a checkout of your own. The only
+tool you need installed is `pandoc` (`brew install pandoc`); nvim is used just
+to refresh `doc/tags`.
+
+`doc/tags` is committed, as |package-create| recommends: nothing in the native
+package path generates it, so shipping it is what makes `:help gittools` work
+for someone who drops the repo into `pack/*/opt` and runs `packadd`. Plugin
+managers -- including `vim.pack` -- delete and regenerate it on install and
+update, so the committed copy costs them nothing.
+
+Options passed to panvimdoc:
+
+- `--shift-heading-level-by -1` so the README's `#` title drops out and `##`
+  headings become the help file's top-level sections -- without it every tag
+  carries the title too (`gittools-gittools.nvim-requirements`).
+- `--dedup-subheadings false` to keep `###` tags short (`gittools-maps`).
+- `--toc true`, `--demojify true`, `--treesitter true`.
+
+Known rough edges, all of them panvimdoc's rendering rather than the README's
+markup: tables are laid out to their content width, so the command table and
+the highlight table run past 78 columns, and pandoc's smart quotes put curly
+apostrophes in the prose. There is no `:GitTool` help tag; panvimdoc tags
+sections only.
+
 ## Conventions
 
 - User-visible messages go through a module-local `_notify` that prefixes

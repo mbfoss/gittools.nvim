@@ -1,0 +1,14 @@
+gittools-base-text	gittools.txt	/*gittools-base-text*
+gittools-development	gittools.txt	/*gittools-development*
+gittools-gittool-blame	gittools.txt	/*gittools-gittool-blame*
+gittools-gittool-diff	gittools.txt	/*gittools-gittool-diff*
+gittools-gittool-diffpaths	gittools.txt	/*gittools-gittool-diffpaths*
+gittools-gittool-diffthis	gittools.txt	/*gittools-gittool-diffthis*
+gittools-gittool-log-and-gittool-graph	gittools.txt	/*gittools-gittool-log-and-gittool-graph*
+gittools-gittool-merge	gittools.txt	/*gittools-gittool-merge*
+gittools-highlights	gittools.txt	/*gittools-highlights*
+gittools-installation	gittools.txt	/*gittools-installation*
+gittools-maps	gittools.txt	/*gittools-maps*
+gittools-requirements	gittools.txt	/*gittools-requirements*
+gittools-table-of-contents	gittools.txt	/*gittools-table-of-contents*
+gittools.txt	gittools.txt	/*gittools.txt*
