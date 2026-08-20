@@ -228,6 +228,9 @@ function M.complete(_, rest, arg_lead)
         end
         out[#out + 1] = "--"
         vim.list_extend(out, git.refs())
+        -- Pathspecs can be given without a `--` here too (`gittools.diff`
+        -- tells them from the revisions), so files belong alongside the refs.
+        vim.list_extend(out, vim.fn.getcompletion(arg_lead, "file"))
         return out
     elseif sub == "diffthis" then
         return git.refs()

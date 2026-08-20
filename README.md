@@ -68,7 +68,8 @@ and are resolved relative to your current directory:
 The `--` is optional when the arguments can't be mistaken for revisions: each
 one is taken as a revision if it names one, and as a path if it exists on disk.
 A wildcard matches neither, so pass those after a `--`; without it git reports
-an ambiguous argument.
+an ambiguous argument. Completion offers refs and paths together, on either
+side of the `--`.
 
 Untracked files are listed whenever the working tree is the right-hand side, as
 are files you have edited but not yet written, which are diffed from the buffer.
