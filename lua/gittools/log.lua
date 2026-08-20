@@ -550,19 +550,58 @@ local function _is_plain_rev(rev)
     return not rev:find("%.%.", 1, false) and not vim.startswith(rev, "^")
 end
 
+--- Split positional arguments that were given *without* a `--` separator into
+--- the revision and the path, the way git itself disambiguates them: a leading
+--- argument that names a revision is the revision, and what follows is the
+--- path. An argument that is neither a known revision nor an existing path is
+--- rejected rather than silently kept as a path that can never match -- again
+--- mirroring git, which asks for an explicit `--` in exactly that case. Ranges
+--- and exclusions are taken as revisions unverified, as they are below.
+---@param name string subcommand name, for the error messages
+---@param root string repo root
+---@param cwd  string directory the path is relative to
+---@param args string[]
+---@return string? rev
+---@return string? path
+---@return string? err  set (with rev/path nil) when an argument is ambiguous
+local function _split_rev_path(name, root, cwd, args)
+    local rev, path
+    for _, a in ipairs(args) do
+        if not path and (not _is_plain_rev(a) or git.verify_rev(root, a)) then
+            if rev then
+                return nil, nil, "GitTool " .. name .. " takes at most one revision"
+            end
+            rev = a
+        elseif vim.uv.fs_stat(vim.fs.normalize(vim.fs.joinpath(cwd, a))) then
+            if path then
+                return nil, nil, "GitTool " .. name .. " takes at most one path"
+            end
+            path = a
+        else
+            return nil, nil, ("ambiguous argument '%s': unknown revision or path not in the "
+                .. "working tree; use '--' to separate paths from revisions"):format(a)
+        end
+    end
+    return rev, path, nil
+end
+
 ---@class GitTools.LogOpts
 ---@field rev  string?    start the log from this revision instead of HEAD
 ---@field path string?    scope the log to commits touching this path
 ---@field args string[]?  extra `git log` options, passed through verbatim
 ---                       (e.g. `--all`, `--no-merges`, `--author=...`)
+---@field unsplit string[]?  positionals given without a `--`, still a mix of
+---                       the revision and the path; split here, where the repo
+---                       is known, in place of `rev`/`path`
 
 --- Validate `opts`, run `git log <extra_args>... <opts.args>... [<rev>]
 --- [-- <path>]`, and show the parsed entries.
+---@param name       string    subcommand name, for the error messages
 ---@param opts       GitTools.LogOpts
 ---@param extra_args string[]
 ---@param parse      fun(out: string): GitTools.LogEntry[]
 ---@param reverse    boolean?  whether the view can render `--reverse` output
-local function _run_log(opts, extra_args, parse, reverse)
+local function _run_log(name, opts, extra_args, parse, reverse)
     local root = git.root()
     if not root then
         _notify("Not inside a git repository", vim.log.levels.WARN)
@@ -575,17 +614,31 @@ local function _run_log(opts, extra_args, parse, reverse)
         return
     end
 
-    if opts.rev and _is_plain_rev(opts.rev) and not git.verify_rev(root, opts.rev) then
-        _notify("Unknown revision: " .. opts.rev, vim.log.levels.ERROR)
+    local rev, path = opts.rev, opts.path
+    if opts.unsplit then
+        -- The path is resolved from the editor's cwd, as it is on git's own
+        -- command line -- unless that cwd sits outside the repo.
+        local cwd = vim.uv.cwd() or root
+        if cwd ~= root and not git.relpath(root, cwd) then cwd = root end
+        local split_err
+        rev, path, split_err = _split_rev_path(name, root, cwd, opts.unsplit)
+        if split_err then
+            _notify(split_err, vim.log.levels.ERROR)
+            return
+        end
+    end
+
+    if rev and _is_plain_rev(rev) and not git.verify_rev(root, rev) then
+        _notify("Unknown revision: " .. rev, vim.log.levels.ERROR)
         return
     end
 
     local rel
-    if opts.path then
-        local abs = vim.fn.fnamemodify(opts.path, ":p")
+    if path then
+        local abs = vim.fn.fnamemodify(path, ":p")
         rel = git.relpath(root, abs)
         if not rel then
-            _notify("File is outside the repository: " .. opts.path, vim.log.levels.WARN)
+            _notify("File is outside the repository: " .. path, vim.log.levels.WARN)
             return
         end
     end
@@ -596,7 +649,7 @@ local function _run_log(opts, extra_args, parse, reverse)
     local args = { "log", "--date=short", "-n", tostring(_LIMIT) }
     vim.list_extend(args, extra_args)
     vim.list_extend(args, opts.args or {})
-    if opts.rev then args[#args + 1] = opts.rev end
+    if rev then args[#args + 1] = rev end
     if rel then
         args[#args + 1] = "--"
         args[#args + 1] = rel
@@ -627,7 +680,7 @@ end
 --- `git log [<opts.args>...] [<rev>] [-- <path>]`.
 ---@param opts GitTools.LogOpts?
 function M.log(opts)
-    _run_log(opts or {}, { "--pretty=format:%H\t%P\t%ad\t%an\t%s" }, _parse_log, true)
+    _run_log("log", opts or {}, { "--pretty=format:%H\t%P\t%ad\t%an\t%s" }, _parse_log, true)
 end
 
 --- Like `M.log`, but with the commit tree drawn in front of each commit, plus
@@ -648,7 +701,7 @@ end
 ---@param opts GitTools.LogOpts?
 function M.graph(opts)
     _define_rail_hl()
-    _run_log(opts or {}, {
+    _run_log("graph", opts or {}, {
         "--topo-order",
         "--parents",
         "--decorate=short",

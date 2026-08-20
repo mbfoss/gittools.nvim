@@ -116,7 +116,14 @@ optional revision to start from and an optional path to scope to:
 :GitTool log                      " history from HEAD
 :GitTool graph v1.2.0             " ...starting at a tag
 :GitTool graph -- lua/gittools    " ...only commits touching a path
+:GitTool log lua/gittools/log.lua " the `--` is optional when it's unambiguous
 ```
+
+As on `git log`'s own command line, the `--` can be left out: a positional that
+names a revision is taken as one, and one that names an existing file or
+directory as the path. An argument that is neither is rejected rather than
+quietly scoping the log to something that can never match, so `--` is only
+needed when a name is both (or when it is neither, such as a wildcard).
 
 Anything else starting with `-` is a `git log` option, handed to git as written,
 so the usual revision selection and filtering applies:
@@ -198,9 +205,13 @@ or `GitTool graph`:
 
 ```sh
 git logtool                            # the current branch
+git logtool lua/gittools/log.lua       # one file's history
 git graphtool --all -n 2000            # every ref, past the 500-commit cap
 git logtool --author=Ren main..dev -- lua/
 ```
+
+Git runs `!` aliases from the top of the worktree, so a path argument is
+resolved from there rather than from the directory you are in.
 
 ## `GitTool blame`
 

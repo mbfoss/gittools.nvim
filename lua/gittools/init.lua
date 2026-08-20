@@ -157,9 +157,18 @@ function M.run(_, args)
         end
         diffthis.diffthis({ rev = revs[1] })
     elseif sub == "log" or sub == "graph" then
-        local before, paths = _split_sep({ unpack(args, 2) })
-        local log_opts, revs = _split_opts(before)
-        if #revs > 1 then
+        local before, paths, sep = _split_sep({ unpack(args, 2) })
+        local log_opts, positionals = _split_opts(before)
+        local fn = sub == "log" and logtool.log or logtool.graph
+        if not sep then
+            -- Without a `--`, the positionals are still a mix of a revision
+            -- and a path, as they are on `git log`'s own command line; only
+            -- `gittools.log` (which knows the repo) can tell them apart, so
+            -- hand them over unsplit.
+            fn({ unsplit = positionals, args = log_opts })
+            return
+        end
+        if #positionals > 1 then
             _notify("GitTool " .. sub .. " takes at most one revision", vim.log.levels.ERROR)
             return
         end
@@ -167,8 +176,7 @@ function M.run(_, args)
             _notify("GitTool " .. sub .. " takes at most one path", vim.log.levels.ERROR)
             return
         end
-        local fn = sub == "log" and logtool.log or logtool.graph
-        fn({ rev = revs[1], path = paths[1], args = log_opts })
+        fn({ rev = positionals[1], path = paths[1], args = log_opts })
     elseif sub == "stashlist" then
         if args[2] then
             _notify("GitTool stashlist takes no arguments", vim.log.levels.ERROR)
