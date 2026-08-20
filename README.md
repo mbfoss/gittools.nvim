@@ -184,6 +184,24 @@ path still joins the rails up across the commits the path filter dropped. Either
 view loads at most 500 commits unless you pass an `-n`/`--max-count`; rails
 whose next commit falls past that limit run off the bottom.
 
+Either view can be opened straight from the command line with a git alias by defining the alias in your git config.
+
+```ini
+[alias]
+    logtool = "!f() { nvim -c \"GitTool log $*\"; }; f"
+    graphtool = "!f() { nvim -c \"GitTool graph $*\"; }; f"
+```
+
+Then `git logtool` opens the list view and `git graphtool` the graph one, and
+anything you pass goes straight through, exactly as it would to `GitTool log`
+or `GitTool graph`:
+
+```sh
+git logtool                            # the current branch
+git graphtool --all -n 2000            # every ref, past the 500-commit cap
+git logtool --author=Ren main..dev -- lua/
+```
+
 ## `GitTool blame`
 
 Annotates the current buffer with per-line commit info in a scroll-bound
