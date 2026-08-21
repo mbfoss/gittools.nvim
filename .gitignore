@@ -1,3 +1,4 @@
 .luarc.json
 /.claude
 /demo-out
+.DS_Store
