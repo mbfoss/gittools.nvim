@@ -244,10 +244,27 @@ update, so the committed copy costs them nothing.
 Section names come from the README headings, and so do the tags, so
 `## \`GitTool diff\`` would give `*gittools-gittool-diff*`. panvimdoc has no
 override for that (`--doc-mapping` only tags `####` headings), so `gendoc.sh`
-strips the `GitTool ` prefix inside headings on the *copy* it feeds panvimdoc:
-the README keeps its descriptive section names, the help file gets
-`*gittools-diff*`. Nothing else in the README is rewritten, and the README
-itself is never modified.
+adds one: a heading may end in a hidden comment naming the tag it wants, with
+the project name prefixed automatically.
+
+```markdown
+## `GitTool diff` <!-- tag: diff -->
+```
+
+The comment is invisible on GitHub, so the README keeps its full section names
+-- the help file's sections are still titled `GitTool diff` -- while the tag
+shrinks to `*gittools-diff*`. A heading without one keeps the tag panvimdoc
+derives from its text, but every section in the README declares one anyway, so
+that renaming a section never silently renames its help tag.
+
+`gendoc.sh` collects those declarations, strips the comments from the *copy* it
+feeds panvimdoc, and rewrites the derived tags in panvimdoc's output, fixing up
+both the `|links|` in the table of contents and the right-alignment of the
+trailing tag. Deriving the "before" tag means reproducing panvimdoc's own rule
+-- lowercase, spaces to `-` -- against the *rendered* heading, which is why the
+inline markdown markers pandoc consumes (`` ` ``, `*`, `_`) are stripped first.
+Nothing else in the README is rewritten, and the README itself is never
+modified.
 
 Options passed to panvimdoc:
 

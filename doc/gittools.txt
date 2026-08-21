@@ -5,13 +5,13 @@ Table of Contents                                 *gittools-table-of-contents*
 
 1. Requirements                                        |gittools-requirements|
 2. Installation                                        |gittools-installation|
-3. diff                                                        |gittools-diff|
-4. diffthis                                                |gittools-diffthis|
-5. log                                                          |gittools-log|
-6. graph                                                      |gittools-graph|
-7. blame                                                      |gittools-blame|
-8. diffpaths                                              |gittools-diffpaths|
-9. merge                                                      |gittools-merge|
+3. GitTool diff                                                |gittools-diff|
+4. GitTool diffthis                                        |gittools-diffthis|
+5. GitTool log                                                  |gittools-log|
+6. GitTool graph                                              |gittools-graph|
+7. GitTool blame                                              |gittools-blame|
+8. GitTool diffpaths                                      |gittools-diffpaths|
+9. GitTool merge                                              |gittools-merge|
   - Maps                                                       |gittools-maps|
   - Base text                                             |gittools-base-text|
 10. Highlights                                           |gittools-highlights|
@@ -82,7 +82,7 @@ which sources them itself.
 
 
 ==============================================================================
-3. diff                                                        *gittools-diff*
+3. GitTool diff                                                *gittools-diff*
 
 Takes the same arguments as `git diff`no revision compares the index against
 the working tree, one compares that revision against the working tree, two
@@ -140,7 +140,7 @@ it.
 
 
 ==============================================================================
-4. diffthis                                                *gittools-diffthis*
+4. GitTool diffthis                                        *gittools-diffthis*
 
 Diffs the current buffer – unsaved edits included – against its git version
 in a side split, using Neovim’s native diff mode. With no argument the git
@@ -156,7 +156,7 @@ the right, so the diff tracks edits as you type.
 
 
 ==============================================================================
-5. log                                                          *gittools-log*
+5. GitTool log                                                  *gittools-log*
 
 Opens the history in a tab of its own, one commit per line, and takes an
 optional revision to start from and an optional path to scope to:
@@ -267,7 +267,7 @@ resolved from there rather than from the directory you are in.
 
 
 ==============================================================================
-6. graph                                                      *gittools-graph*
+6. GitTool graph                                              *gittools-graph*
 
 The same view as `GitTool log` – same arguments, same `git log` options, same
 keys – with the commit tree drawn in front of each commit and the ref names
@@ -304,7 +304,7 @@ bottom.
 
 
 ==============================================================================
-7. blame                                                      *gittools-blame*
+7. GitTool blame                                              *gittools-blame*
 
 Annotates the current buffer with per-line commit info in a scroll-bound
 sidebar. The buffer’s live contents are blamed, so unsaved edits stay
@@ -321,7 +321,7 @@ replaced or deleted.
 
 
 ==============================================================================
-8. diffpaths                                              *gittools-diffpaths*
+8. GitTool diffpaths                                      *gittools-diffpaths*
 
 Diffs two arbitrary paths off disk in the same file-list + side-by-side layout
 as `GitTool diff`, with no repository involved. Both paths must be the same
@@ -359,7 +359,7 @@ Escaping keeps the quotes so the `-c` argument stays a single command.
 
 
 ==============================================================================
-9. merge                                                      *gittools-merge*
+9. GitTool merge                                              *gittools-merge*
 
 Shows the `$MERGED` file in a normal, editable buffer with each conflict region
 painted as a Current / Base / Incoming band, and adds buffer-local maps to

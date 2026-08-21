@@ -20,11 +20,11 @@ unnamed buffer. Closing such a view closes the tab with it, returning you to the
 window layout you launched it from. `diffthis`, `blame` and `merge` act on the
 current buffer and stay in the current tab.
 
-## Requirements
+## Requirements <!-- tag: requirements -->
 
 Neovim >= 0.10 and `git` on your `PATH`.
 
-## Installation
+## Installation <!-- tag: installation -->
 
 With any plugin manager, or by dropping the repository into your package path.
 There is nothing to configure and no setup call to make: `:GitTool` registers
@@ -45,7 +45,7 @@ vim.cmd.packadd("gittools.nvim")
 sourced in the normal pass afterwards; after startup use the plain `packadd`,
 which sources them itself.
 
-## `GitTool diff`
+## `GitTool diff` <!-- tag: diff -->
 
 Takes the same arguments as `git diff`: no revision compares the index against
 the working tree, one compares that revision against the working tree, two
@@ -94,7 +94,7 @@ the submodule's own working tree when that is what the parent is being compared
 against, so uncommitted edits inside it show too. The session you launched from
 stays open, and closing the submodule's tab returns you to it.
 
-## `GitTool diffthis`
+## `GitTool diffthis` <!-- tag: diffthis -->
 
 Diffs the current buffer -- unsaved edits included -- against its git version in
 a side split, using Neovim's native diff mode. With no argument the git side is
@@ -108,7 +108,7 @@ the index; pass a revision to compare against that instead:
 The git side is a read-only scratch buffer on the left; the live buffer is on
 the right, so the diff tracks edits as you type.
 
-## `GitTool log`
+## `GitTool log` <!-- tag: log -->
 
 Opens the history in a tab of its own, one commit per line, and takes an
 optional revision to start from and an optional path to scope to:
@@ -209,7 +209,7 @@ git logtool --author=Ren main..dev -- lua/
 Git runs `!` aliases from the top of the worktree, so a path argument is
 resolved from there rather than from the directory you are in.
 
-## `GitTool graph`
+## `GitTool graph` <!-- tag: graph -->
 
 The same view as `GitTool log` -- same arguments, same `git log` options, same
 keys -- with the commit tree drawn in front of each commit and the ref names
@@ -243,7 +243,7 @@ whose next commit falls past the 500-commit cap run off the bottom.
 
 `--reverse` works in `log`; `graph` rejects it, as it does `--graph` itself.
 
-## `GitTool blame`
+## `GitTool blame` <!-- tag: blame -->
 
 Annotates the current buffer with per-line commit info in a scroll-bound
 sidebar. The buffer's live contents are blamed, so unsaved edits stay
@@ -259,7 +259,7 @@ The annotations are a snapshot, so the sidebar closes as soon as they could go
 stale: on either window closing, or on the file being edited, reloaded, replaced
 or deleted.
 
-## `GitTool diffpaths`
+## `GitTool diffpaths` <!-- tag: diffpaths -->
 
 Diffs two arbitrary paths off disk in the same file-list + side-by-side layout
 as `GitTool diff`, with no repository involved. Both paths must be the same
@@ -295,7 +295,7 @@ the value, which would leave nvim running a bare `GitTool` (no subcommand, so it
 reports `Argument required`) and treating the paths as files to open. Escaping
 keeps the quotes so the `-c` argument stays a single command.
 
-## `GitTool merge`
+## `GitTool merge` <!-- tag: merge -->
 
 Shows the `$MERGED` file in a normal, editable buffer with each conflict region
 painted as a Current / Base / Incoming band, and adds buffer-local maps to
@@ -341,7 +341,7 @@ Was the merge successful [y/n]?
 
 and leaves the conflict in place if you answer `n`.
 
-### Maps
+### Maps <!-- tag: maps -->
 
 All conflict maps share an `x` prefix, matching the `]x` / `[x` motions:
 
@@ -360,7 +360,7 @@ These are buffer-local to `$MERGED`. Note that while they are active, a bare `x`
 Accepting only edits the buffer -- save with `:w`. Nothing here stages or checks
 out; `git mergetool` stages `$MERGED` itself on exit.
 
-### Base text
+### Base text <!-- tag: base-text -->
 
 `xa` needs the common ancestor. If you set
 
@@ -376,7 +376,7 @@ have hand-edited or resolved some regions, `xa` declines rather than insert text
 from the wrong region. `zdiff3` is the more reliable setup. An add/add conflict
 has no ancestor, so `xa` never applies there.
 
-## Highlights
+## Highlights <!-- tag: highlights -->
 
 All link to defaults and can be overridden by a colorscheme.
 
@@ -388,7 +388,7 @@ All link to defaults and can be overridden by a colorscheme.
 | `GitToolsLogMark` | the `»` comparison-base marker |
 | `GitToolsMergeCurrent` / `Incoming` / `Base` / `Marker` / `Label` | the merge view's bands |
 
-## Development
+## Development <!-- tag: development -->
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for internals, design notes and
 conventions.
