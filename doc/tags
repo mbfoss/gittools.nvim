@@ -1,6 +1,5 @@
 gittools-base-text	gittools.txt	/*gittools-base-text*
 gittools-blame	gittools.txt	/*gittools-blame*
-gittools-development	gittools.txt	/*gittools-development*
 gittools-diff	gittools.txt	/*gittools-diff*
 gittools-diffpaths	gittools.txt	/*gittools-diffpaths*
 gittools-diffthis	gittools.txt	/*gittools-diffthis*

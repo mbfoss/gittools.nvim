@@ -13,7 +13,14 @@ A git-backed front end for Neovim's native diff facilities, under a single
 | `GitTool stashlist` | browse `git stash list` the same way as `log` |
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
 | `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
+<!-- panvimdoc-ignore-start -->
+![gittools.nvim](https://raw.githubusercontent.com/mbfoss/gittools.nvim/assets/demos/demo.gif)
 
+The take above walks `GitTool graph --all` (`K` for a commit's details, `c` to
+mark a comparison base, `<CR>` to diff it), `GitTool diff HEAD` over a working
+tree with a staged, an unstaged and an untracked change, and `GitTool blame`.
+
+<!-- panvimdoc-ignore-end -->
 `diff`, `diffpaths`, `log`, `graph` and `stashlist` open in a tab of their own.
 The current tab is reused only when it is a single window holding an empty,
 unnamed buffer. Closing such a view closes the tab with it, returning you to the
@@ -388,7 +395,10 @@ All link to defaults and can be overridden by a colorscheme.
 | `GitToolsLogMark` | the `»` comparison-base marker |
 | `GitToolsMergeCurrent` / `Incoming` / `Base` / `Marker` / `Label` | the merge view's bands |
 
+<!-- panvimdoc-ignore-start -->
 ## Development <!-- tag: development -->
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for internals, design notes and
 conventions.
+
+<!-- panvimdoc-ignore-end -->
