@@ -272,7 +272,7 @@ Options passed to panvimdoc:
   headings become the help file's top-level sections -- without it every tag
   carries the title too (`gittools-gittools.nvim-requirements`).
 - `--dedup-subheadings false` to keep `###` tags short (`gittools-maps`).
-- `--toc true`, `--demojify true`, `--treesitter true`.
+- `--toc true`, `--treesitter true`.
 
 Known rough edges, all of them panvimdoc's rendering rather than the README's
 markup: tables are laid out to their content width, so the command table and
