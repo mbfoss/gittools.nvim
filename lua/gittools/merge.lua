@@ -45,6 +45,7 @@ local _HL = {
     { "GitToolsMergeBase",     "DiffText" },
     { "GitToolsMergeMarker",   "Comment" },
     { "GitToolsMergeLabel",    "Identifier" },
+    { "GitToolsMergeHint",     "Special" },
 }
 for _, pair in ipairs(_HL) do
     vim.api.nvim_set_hl(0, pair[1], { link = pair[2], default = true })
@@ -210,9 +211,10 @@ local function _range_lines(buf, range)
 end
 
 --- Paint the bands. Content lines get `line_hl_group` + `hl_eol` so blank lines
---- inside a side still carry their colour; the `<<<<<<<` line additionally gets
---- a virtual-text hint, which is the only key discoverability surface the plugin
---- offers anywhere.
+--- inside a side still carry their colour; every marker line gets virtual text
+--- naming the section it opens, and the `<<<<<<<` line additionally carries the
+--- key hint, which is the only key discoverability surface the plugin offers
+--- anywhere.
 ---@param session GitTools.MergeSession
 local function _render(session)
     local buf = session.buf
@@ -236,22 +238,29 @@ local function _render(session)
         band(h.base, "GitToolsMergeBase")
         band(h.theirs, "GitToolsMergeIncoming")
 
+        local labels = {
+            [h.s_lnum]        = "▲ CURRENT (" .. h.ours_label .. ")",
+            [h.theirs[1] - 1] = "▼ INCOMING (" .. h.theirs_label .. ")",
+            [h.e_lnum]        = "end of conflict",
+        }
+        if h.base then labels[h.base[1] - 1] = "◆ BASE (common ancestor)" end
+
         local markers = { h.s_lnum, h.theirs[1] - 1, h.e_lnum }
         if h.base then markers[#markers + 1] = h.base[1] - 1 end
         for _, lnum in ipairs(markers) do
+            local virt = { { "  " .. labels[lnum], "GitToolsMergeLabel" } }
+            if lnum == h.s_lnum then
+                virt[#virt + 1] = { "  ·  xc current · xi incoming · xb both · xa base · xd diff",
+                    "GitToolsMergeHint" }
+            end
             vim.api.nvim_buf_set_extmark(buf, _ns, lnum - 1, 0, {
                 line_hl_group = "GitToolsMergeMarker",
                 hl_eol        = true,
+                virt_text     = virt,
+                virt_text_pos = "eol",
                 strict        = false,
             })
         end
-
-        vim.api.nvim_buf_set_extmark(buf, _ns, h.s_lnum - 1, 0, {
-            virt_text     = { { "  xc current · xi incoming · xb both · xa base · xd diff",
-                "GitToolsMergeLabel" } },
-            virt_text_pos = "eol",
-            strict        = false,
-        })
     end
 end
 
