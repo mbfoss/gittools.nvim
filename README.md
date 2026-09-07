@@ -427,6 +427,10 @@ All link to defaults and can be overridden by a colorscheme.
 | `GitToolsLogMark` | the `»` comparison-base marker |
 | `GitToolsMergeCurrent` / `Incoming` / `Base` / `Marker` / `Label` | the merge view's bands |
 
+## License <!-- tag: license -->
+
+MIT
+
 <!-- panvimdoc-ignore-start -->
 ## Development <!-- tag: development -->
 
