@@ -1,0 +1,40 @@
+# `Gittools diff HEAD`: staged, unstaged and untracked changes in one list.
+size 110x32
+init init.lua
+cwd fixture
+out ../demo-out/diff.gif
+cast ../demo-out/diff.cast
+
+font-size 17
+line-height 1.19
+theme nord
+fps 20
+
+keycast on
+keycast-width 44
+caption gittools.nvim  ·  Gittools diff HEAD
+sleep 400ms
+
+key :Gittools diff HEAD<CR>
+wait notes.txt
+sleep 900ms
+
+key <C-w>j
+sleep 300ms
+key g?
+wait Open the diff
+sleep 1200ms
+key j
+key k
+sleep 400ms
+
+key <CR>
+wait verbose = true
+sleep 1200ms
+
+key ]f
+wait toggle = true
+sleep 1000ms
+key ]f
+wait next release
+sleep 1400ms

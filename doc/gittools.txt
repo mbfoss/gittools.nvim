@@ -1,0 +1,640 @@
+*gittools*          A git-backed front end for Neovim's native diff facilities
+
+==============================================================================
+Table of Contents                                 *gittools-table-of-contents*
+
+1. Requirements                                        |gittools-requirements|
+2. Installation                                        |gittools-installation|
+3. Gittools diff                                               |gittools-diff|
+4. Gittools diffthis                                       |gittools-diffthis|
+5. Gittools log                                                 |gittools-log|
+6. Gittools logthis                                         |gittools-logthis|
+7. Gittools graph                                             |gittools-graph|
+8. Gittools reflog                                           |gittools-reflog|
+9. Gittools blame                                             |gittools-blame|
+10. Gittools diffpaths                                    |gittools-diffpaths|
+11. Gittools merge                                            |gittools-merge|
+  - Maps                                                       |gittools-maps|
+  - Base text                                             |gittools-base-text|
+12. Gittools refresh                                        |gittools-refresh|
+13. Highlights                                           |gittools-highlights|
+14. License                                                 |gittools-license|
+
+  [!NOTE] **Work in progress.** The plugin is stable and usable, but it is still
+  evolving. Breaking changes can happen at any time. Pin a commit if you need a
+  fixed version.
+A git front end for Neovim’s native diff features, under a single `:Gittools`
+command.
+
+  ---------------------------------------------------------------------------------------------
+  command                                                   what it does
+  --------------------------------------------------------- -----------------------------------
+  Gittools diff [--staged] [<rev> [<rev>]] [-- <path>...]   directory diff: file list +
+                                                            side-by-side layout
+
+  Gittools diffpaths <a> <b>                                diff two files or two directories
+                                                            off disk (no repo needed)
+
+  Gittools diffthis [<rev>]                                 diff the current buffer, including
+                                                            unsaved edits
+
+  Gittools log [<opt>...] [<rev>] [-- <path>]               browse commit history as an
+                                                            interactive list
+
+  Gittools logthis [<opt>...] [<rev>]                       like log, scoped to the current
+                                                            buffer’s file
+
+  Gittools graph [<opt>...] [<rev>] [-- <path>]             like log, with the commit tree
+                                                            drawn alongside it
+
+  Gittools stashlist                                        browse git stash list the same way
+                                                            as log
+
+  Gittools reflog [<ref>] [<opt>...]                        browse git reflog the same way,
+                                                            HEAD by default
+
+  Gittools blame                                            annotate the current buffer in a
+                                                            scroll-bound sidebar
+
+  Gittools merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]   resolve merge conflicts inline
+
+  Gittools refresh                                          re-read the session the current
+                                                            buffer belongs to
+  ---------------------------------------------------------------------------------------------
+Tab behaviour:
+
+- Own tab: `diff`, `diffpaths`, `log`, `logthis`, `graph`, `stashlist`, `reflog`.
+- Current tab: `diffthis`, `blame`, `merge`.
+- The current tab is reused only when it holds a single window over an empty,
+    unnamed buffer; closing the view then closes the tab.
+
+
+==============================================================================
+1. Requirements                                        *gittools-requirements*
+
+- Neovim >= 0.10
+- `git` on `PATH`
+
+
+==============================================================================
+2. Installation                                        *gittools-installation*
+
+Any plugin manager, or drop the repository into your package path. No `setup()`
+call and nothing to configure: `plugin/` registers `:Gittools`, and the feature
+modules load on first use.
+
+lazy.nvim <https://github.com/folke/lazy.nvim>:
+
+>lua
+    { "mbfoss/gittools.nvim", cmd = "Gittools" }
+<
+
+From `pack/*/opt`:
+
+>lua
+    vim.cmd.packadd("gittools.nvim")
+<
+
+`packadd!` works during startup (`plugin/` is sourced in the normal pass
+afterwards); after startup use plain `packadd`.
+
+
+==============================================================================
+3. Gittools diff                                               *gittools-diff*
+
+Arguments as `git diff`:
+
+  -----------------------------------------------------------------------
+  arguments                           comparison
+  ----------------------------------- -----------------------------------
+  none                                index vs working tree
+
+  <rev>                               that revision vs working tree
+
+  <rev> <rev>                         the two revisions
+
+  --staged / --cached                 HEAD (or the named revision) vs
+                                      index
+
+  trailing paths                      limits the diff, resolved relative
+                                      to the current directory
+  -----------------------------------------------------------------------
+>vim
+    :Gittools diff                          " index vs working tree
+    :Gittools diff HEAD~3                   " ...against an older commit
+    :Gittools diff --staged                 " HEAD vs index
+    :Gittools diff main dev                 " two revisions
+    :Gittools diff src/config.lua           " one file, index vs working tree
+    :Gittools diff main dev -- src/ README.md
+    :Gittools diff HEAD -- '*.lua'          " a pathspec, so it needs the --
+<
+
+Argument disambiguation:
+
+- `--` optional when unambiguous: an argument naming a revision is a revision,
+    one existing on disk is a path.
+- Wildcards match neither, so pass them after `--`; without it git reports an
+    ambiguous argument.
+- Completion offers refs and paths on both sides of the `--`.
+
+Included in the file list:
+
+- Untracked files, whenever the working tree is the right-hand side.
+- Unwritten buffer edits, diffed from the buffer.
+- Pathspecs filter both.
+
+Layout: a file list in a bottom split drives a side-by-side diff. The list’s
+winbar names the two sides being compared: each revision with the branch, tag,
+or hash it resolves to, plus the index or working tree.
+
+  -----------------------------------------------------------------------
+  key                                 action
+  ----------------------------------- -----------------------------------
+  <CR>                                show the file under the cursor and
+                                      jump into the diff
+
+  ]f / [f                             show the next / previous file, from
+                                      anywhere in the tab
+
+  o                                   on a submodule row, open the
+                                      submodule’s own diff in a new tab
+
+  g?                                  list these keys (on the command
+                                      line when the list is too short for
+                                      a float)
+  -----------------------------------------------------------------------
+`]f` / `[f` step through the current tab’s session, so two open diffs stay
+independent.
+
+Submodules:
+
+- Submodules are listed as ordinary entries. `<CR>` shows the pair of commit
+    IDs, as git does.
+- `o` opens a second diff over the submodule in its own tab, same layout:
+    between the recorded commits, or against the submodule’s working tree when
+    that is the parent’s right-hand side, so uncommitted edits inside it show.
+- The launching session stays open; closing the submodule tab returns to it.
+
+
+==============================================================================
+4. Gittools diffthis                                       *gittools-diffthis*
+
+Diffs the current buffer, including unsaved edits, against its git version in a
+side split, in native diff mode. With no argument, it compares against the
+index.
+
+>vim
+    :Gittools diffthis
+    :Gittools diffthis HEAD~1
+<
+
+- Left: read-only scratch buffer with the git side.
+- Right: the live buffer, so the diff tracks edits as you type.
+- `g?` in the git side lists the keys.
+
+
+==============================================================================
+5. Gittools log                                                 *gittools-log*
+
+History in a tab of its own, one commit per line. Takes an optional starting
+revision and an optional path:
+
+>vim
+    :Gittools log                      " history from HEAD
+    :Gittools log v1.2.0               " ...starting at a tag
+    :Gittools log -- src               " ...only commits touching a path
+    :Gittools log src/config.lua       " the `--` is optional when it's unambiguous
+<
+
+`--` rules, as on `git log`:
+
+- A positional naming a revision is a revision; one naming an existing file or
+    directory is the path.
+- An argument that is neither is rejected instead of silently scoping the log
+    to a path that cannot match.
+- A name that is both, given alone, is read as the revision.
+- `--` is needed only for a name that is both, or one that is neither (a
+    wildcard).
+
+>vim
+    :Gittools log assets --            " the branch
+    :Gittools log -- assets            " the directory
+    :Gittools log -- src/*.lua         " a pathspec, which names no file on disk
+<
+
+Anything else starting with `-` is a `git log` option, handed to git as
+written:
+
+>vim
+    :Gittools log --all                " every branch, tag and remote, not just HEAD
+    :Gittools log --branches --remotes --no-merges
+    :Gittools log --all -n 2000        " raise the 500-commit default cap
+    :Gittools log --author=alice --since=2.weeks main..dev -- src/
+<
+
+- Completion: `--all`, `--branches`, `--remotes`, `--tags`, `--first-parent`,
+    `--merges`, `--no-merges`, `--author=`, `--grep=`, `--since=`, `--until=`,
+    `-n`, … alongside refs and paths, before and after a `--`.
+- Rejected with a message: options replacing the one-line-per-commit output
+    (`--pretty`, `--format`, `--oneline`, `--stat`, `--patch`, `--name-status`,
+    `-z` and similar) and `--graph` (gittools draws the rails).
+- Anything git doesn’t recognise comes back as git’s own error.
+- Cap: 500 commits unless you pass `-n` / `--max-count`.
+
+  -----------------------------------------------------------------------
+  key                                 action
+  ----------------------------------- -----------------------------------
+  <CR>                                diff the commit under the cursor
+                                      (against its first parent, or the
+                                      marked base)
+
+  c                                   mark / unmark the commit under the
+                                      cursor as the comparison base
+
+  K                                   show the commit’s header, message
+                                      and diffstat in a float
+
+  g?                                  list these keys in a float
+  -----------------------------------------------------------------------
+`Gittools stashlist` is the same view over `git stash list`, each entry
+labelled by its `stash@{N}` selector.
+
+The marked commit is drawn with a `»`:
+
+>
+    ●   4bebd0e 2025-06-13 Alice  (HEAD -> main) Merge pull request #40 from feat/toggle
+    ● » 1f0a2c9 2025-06-11 Bob    Add the toggle
+    ●   9d3e871 2025-06-10 Alice  Tidy up the option table
+<
+
+- `<CR>` then diffs against the mark instead of against parents.
+- Only one commit is ever marked: `c` elsewhere moves it, `c` on it clears it.
+- `<CR>` on the marked commit still diffs against its parent.
+
+The diff opens in its own tab and the history stays open, so closing the diff
+returns to the same commit in the list.
+
+Buffer names say which history a tab holds: `gittools://log/HEAD`,
+`gittools://graph/v1.2.0:src`, `gittools://stashlist`,
+`gittools://reflog/HEAD`.
+
+Git aliases, for opening either view from the shell:
+
+>ini
+    [alias]
+        logtool = "!f() { nvim -c \"Gittools log $*\"; }; f"
+        graphtool = "!f() { nvim -c \"Gittools graph $*\"; }; f"
+<
+
+>sh
+    git logtool                            # the current branch
+    git logtool src/config.lua             # one file's history
+    git graphtool --all -n 2000            # every ref, past the 500-commit cap
+    git logtool --author=alice main..dev -- src/
+<
+
+Arguments pass straight through. Git runs `!` aliases from the top of the
+worktree, so path arguments resolve from there, not from your current
+directory.
+
+
+==============================================================================
+6. Gittools logthis                                         *gittools-logthis*
+
+`Gittools log` scoped to the current buffer’s file, what `diffthis` is to
+`diff`:
+
+>vim
+    :Gittools logthis                  " this file's history from HEAD
+    :Gittools logthis v1.2.0           " ...starting at a tag
+    :Gittools logthis --no-merges -n 20
+<
+
+- View, keys and `git log` options: `Gittools log`’s.
+- Path comes from the buffer, so a revision is the only positional accepted;
+    no `--` and no path of your own.
+- Unsaved edits play no part; git only knows the commits on disk.
+- Renames are followed (`git log --follow`); `--no-follow` limits history to
+    the current path.
+
+
+==============================================================================
+7. Gittools graph                                             *gittools-graph*
+
+The same view as `Gittools log`, with the same arguments, options and keys. It
+also draws the commit tree in front of each commit and ref names after the
+author, using box-drawing characters. Each rail is colored by its column.
+
+>vim
+    :Gittools graph                    " history from HEAD, with the rails
+    :Gittools graph v1.2.0             " ...starting at a tag
+    :Gittools graph --all              " every branch, tag and remote, not just HEAD
+    :Gittools graph --all -n 2000      " raise the 500-commit default cap
+    :Gittools graph -- src/*.lua       " a pathspec, which names no file on disk
+<
+
+>
+    ◆   4bebd0e 2025-06-13 Alice  (HEAD -> main) Merge pull request #40 from feat/toggle
+    ├─╮
+    │ ● e1817e2 2025-06-13 Bob    feat: add the toggle option
+    ├─╯
+    ●   21f984b 2025-06-13 Alice  fix: handle an empty option table
+<
+
+- `●` ordinary commit, `◆` more than one parent.
+- A branch curves out below its merge commit and back in at its fork, so a rail
+    spans exactly the commits on it.
+- Topological order, as `git log --graph`: a branch’s commits appear in one
+    unbroken run.
+- Path scoping still joins rails across the commits the filter dropped.
+- Rails whose next commit falls past the 500-commit cap run off the bottom.
+- `--reverse` works in `log`; `graph` rejects it, as it does `--graph`.
+
+
+==============================================================================
+8. Gittools reflog                                           *gittools-reflog*
+
+`Gittools log`’s view over `git reflog`, one reflog entry per line, `HEAD` by
+default or a ref you name.
+
+>vim
+    :Gittools reflog                       " HEAD's reflog
+    :Gittools reflog main                  " a branch's
+    :Gittools reflog -n 20                 " the 20 most recent
+    :Gittools reflog --since=2.hours.ago
+<
+
+>
+      HEAD@{0} 2026-10-11 18:52 Alice reset: moving to HEAD~1
+    » HEAD@{1} 2026-10-11 18:47 Alice commit (amend): tidy the option table
+      HEAD@{2} 2026-10-11 18:31 Bob commit: add the toggle
+<
+
+  -----------------------------------------------------------------------
+  key                                 action
+  ----------------------------------- -----------------------------------
+  <CR>                                diff the entry against the
+                                      comparison base, or the entry below
+                                      it
+
+  c                                   mark / unmark the entry under the
+                                      cursor as the comparison base
+
+  K                                   show the pointed-at commit’s
+                                      details in a float
+
+  g?                                  list these keys
+  -----------------------------------------------------------------------
+`<CR>` with nothing marked compares the entry against the one _below_ it, the
+state before that event:
+
+- This is the state a `reset`, `amend`, or `rebase` entry changed. Its first
+    parent often says nothing about the event.
+- Entries that repeat a commit (a `checkout` that moved nothing) are skipped.
+    The oldest entry falls back to its own first parent.
+- `c` marks one entry, and `<CR>` then compares against that instead, as in
+    `log`.
+
+What the line shows:
+
+- The selector is the entry’s identity, not the hash: one commit can sit on
+    several entries.
+- The date is the entry’s own, not the pointed-at commit’s, so a `reset` to an
+    old commit is dated when it ran, not when that commit was written.
+- The author is the pointed-at commit’s; git names no reflog actor.
+- `<CR>` and `K` act on the commit the entry points at.
+
+Options:
+
+- `-n` / `--max-count`, `--since`.
+- Refused: `--until`, `--skip`, `--grep`, `--author`, `--all`, `--reverse`. Every
+    `HEAD@{N}` shown is derived from list position, so an option that drops entries
+    from the head or the middle would print incorrect selectors.
+- `Gittools log --reflog` is different: it lists the commits that reflogs
+    mention, deduplicated, and has no reflog entries of its own.
+
+
+==============================================================================
+9. Gittools blame                                             *gittools-blame*
+
+Per-line commit info in a scroll-bound sidebar. The buffer’s live contents
+are blamed, so unsaved edits stay line-aligned and show as "Not committed".
+Moving the cursor shows the commit’s summary for the line under it.
+
+  key    action
+  ------ -----------------------------------------------------
+  <CR>   diff the commit under the cursor against its parent
+  K      show that commit’s details in a float
+  R      re-blame the file as it was just before that commit
+  <BS>   go back to the blame R came from
+  g?     list these keys in a float
+`R`:
+
+- Goes back past the commit that last touched the line, to what the line was
+    before it and who wrote it.
+- The file window switches to a read-only copy of the file at that commit’s
+    parent, under its path there, so renames are followed; the sidebar blames
+    that copy.
+- Repeatable; `<BS>` steps forward again; closing the sidebar at any depth
+    returns the window to your file.
+
+The annotations are a snapshot. The sidebar closes when either window closes or
+when the file is edited, reloaded, replaced, or deleted.
+
+
+==============================================================================
+10. Gittools diffpaths                                    *gittools-diffpaths*
+
+Diffs two arbitrary paths on disk in the `Gittools diff` layout, without a
+repository. Both paths must be the same kind.
+
+>vim
+    :Gittools diffpaths old/config.lua new/config.lua   " two files
+    :Gittools diffpaths ./before ./after               " two directories
+<
+
+- Two files open directly into the diff.
+- Two directories are compared recursively; every differing file becomes a row,
+    added/deleted files showing an empty pane on the missing side.
+- Paths complete, so `:Gittools diffpaths <Tab>` works.
+
+The two-argument form is git’s difftool calling convention:
+
+>ini
+    [difftool "gittools_diff"]
+        cmd = nvim -c \"Gittools diffpaths $LOCAL $REMOTE\"
+    [diff]
+        tool = gittools_diff
+<
+
+- `git difftool` opens each changed file in the layout.
+- `git difftool -d` opens the whole change set at once; its file list has no
+    winbar, the temp trees it diffs naming nothing.
+- Submodules are listed as rows and `o` opens their own diff, as in
+    `Gittools diff`.
+
+The `\"` escaping is required: git’s config parser strips a plain `"..."`,
+leaving nvim to run a bare `Gittools` (`Argument required`) and open the paths
+as files.
+
+
+==============================================================================
+11. Gittools merge                                            *gittools-merge*
+
+`$MERGED` in a normal, editable buffer, each conflict region painted as a
+Current / Base / Incoming band, with buffer-local maps to resolve them.
+
+>vim
+    :Gittools merge                  " the current buffer's file
+    :Gittools merge path/to/file     " that file, from anywhere
+    :Gittools merge $LOCAL $BASE $REMOTE $MERGED
+<
+
+- The first two forms name only `$MERGED` and recover the other three sides
+    from its index stages, so they work on any conflicted file in the repo.
+- The single-file form completes paths.
+- With no argument and a non-conflicted buffer, the repository’s conflicted
+    files are offered through `vim.ui.select` (so a picker plugin replacing it is
+    used), each with its remaining conflict count. A single conflicted file opens
+    straight away.
+
+>
+    f.txt  resolved, not staged
+    g.txt  2 conflicts
+<
+
+A resolved, saved file is still conflicted to git until staged, so it stays in
+the list, marked as resolved.
+
+The four-argument form is git’s mergetool calling convention:
+
+>ini
+    [mergetool "gittools_merge"]
+        cmd = nvim -c \"Gittools merge $LOCAL $BASE $REMOTE $MERGED\"
+        trustExitCode = false
+    [merge]
+        tool = gittools_merge
+<
+
+`git mergetool` then opens each conflicted file in turn.
+
+`trustExitCode = false` matters:
+
+- This view never writes `$MERGED`; resolving is an edit and `:w` saves it, so
+    `:q` leaves the file untouched and exits 0.
+- With `true`, git reads that 0 as "resolved" and stages the file with its
+    conflict markers.
+- With `false`, git checks whether the file changed: a saved file is accepted
+    silently, an unsaved one prompts
+
+>
+    $MERGED seems unchanged.
+    Was the merge successful [y/n]?
+<
+
+and answering `n` leaves the conflict in place.
+
+
+MAPS                                                           *gittools-maps*
+
+All conflict maps share an `x` prefix, matching the `]x` / `[x` motions:
+
+  -----------------------------------------------------------------------
+  key                                 action
+  ----------------------------------- -----------------------------------
+  xc                                  accept the current change (ours)
+
+  xi                                  accept the incoming change (theirs)
+
+  xb                                  accept both changes, current first
+
+  xa                                  accept the base (common ancestor)
+
+  ]x / [x                             jump to the next / previous
+                                      conflict
+
+  xd                                  toggle the $LOCAL | $MERGED |
+                                      $REMOTE three-way diff
+  -----------------------------------------------------------------------
+- Each conflict’s first marker line shows its position, `[2/5]`; `]x` / `[x`
+    echo it as they move.
+- Resolving echoes how many are left; clearing the last one, by map or by hand,
+    says so, as the cue to `:w`.
+- The mappings are buffer-local to `$MERGED` and apply to the conflict the
+    cursor is inside. Outside a region they do nothing, since they rewrite whole
+    blocks.
+- Outside a conflict, `x` keeps its built-in behavior as the delete-character
+    command and does not wait for `'timeoutlen'`. Inside a conflict, `x` is a
+    prefix, and a lone `x` deletes once the timeout expires. Outside a conflict,
+    `xc` therefore means delete, then a pending change operator.
+- Accepting only edits the buffer; `:w` saves. Nothing here stages or checks
+    out; `git mergetool` stages `$MERGED` itself on exit.
+
+
+BASE TEXT                                                 *gittools-base-text*
+
+`xa` needs the common ancestor.
+
+>ini
+    [merge]
+        conflictStyle = zdiff3
+<
+
+- With `zdiff3`, git writes the base into the conflict markers and `xa` reads
+    it from the buffer. Prefer this setup.
+- Otherwise, gittools recovers the base by re-merging the three inputs. This
+    works only while the file’s conflicts still match a fresh merge. After a
+    manual edit or a resolve, `xa` refuses instead of inserting text from the
+    wrong region.
+- An add/add conflict has no ancestor, so `xa` never applies there.
+
+
+==============================================================================
+12. Gittools refresh                                        *gittools-refresh*
+
+Re-reads the session the current buffer belongs to, in place:
+
+- `diff` / `diffpaths`: recollects the changed files and redraws the list; the
+    cursor stays on the same path when it still differs.
+- `diffthis`: re-fetches the git side. The live buffer is untouched.
+- `blame`: re-runs the blame of the level on screen.
+- `log`, `logthis`, `graph`, `stashlist`, `reflog`: re-runs the query; the mark
+    and the cursor’s entry stay where they still exist.
+- No session: reports that there is nothing to refresh.
+
+>vim
+    :Gittools refresh
+<
+
+
+==============================================================================
+13. Highlights                                           *gittools-highlights*
+
+All groups link to defaults and can be overridden by a colorscheme.
+
+  -----------------------------------------------------------------------
+  group                               where
+  ----------------------------------- -----------------------------------
+  GitToolsStatusAdded / Modified /    the status letter in a diff file
+  Deleted / Renamed / Copied /        list
+  Untracked                           
+
+  GitToolsRenameOldPath,              rename entries in that list
+  GitToolsRenameArrow                 
+
+  GitToolsGraph1 .. GitToolsGraph6    graph rails, cycled by column
+
+  GitToolsLogMark                     the » comparison-base marker
+
+  GitToolsMergeCurrent / Incoming /   the merge view’s bands
+  Base / Marker / Label               
+  -----------------------------------------------------------------------
+
+==============================================================================
+14. License                                                 *gittools-license*
+
+MIT <LICENSE>.
+
+Generated by panvimdoc <https://github.com/kdheepak/panvimdoc>
+
+vim:tw=78:ts=8:noet:ft=help:norl:

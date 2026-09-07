@@ -1,0 +1,41 @@
+# `Gittools blame`: per-line history, commit details, and stepping back with R.
+size 110x32
+init init.lua
+cwd fixture
+out ../demo-out/blame.gif
+cast ../demo-out/blame.cast
+
+font-size 17
+line-height 1.19
+theme nord
+fps 20
+
+keycast on
+keycast-width 44
+caption gittools.nvim  ·  Gittools blame
+sleep 400ms
+
+key :edit lua/app.lua<CR>
+wait lua/app.lua
+sleep 300ms
+
+key :Gittools blame<CR>
+wait 2025-01-10
+sleep 900ms
+
+key 8G
+sleep 700ms
+key <C-w>h
+sleep 300ms
+key K
+wait Author:
+sleep 1200ms
+key j
+key k
+sleep 400ms
+
+key R
+wait gittools://
+sleep 1400ms
+key <BS>
+sleep 1400ms

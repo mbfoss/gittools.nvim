@@ -1,0 +1,45 @@
+# `Gittools graph --all`: history, commit details, comparison base, diff.
+size 110x32
+init init.lua
+cwd fixture
+out ../demo-out/graph.gif
+cast ../demo-out/graph.cast
+
+font-size 17
+line-height 1.19
+theme nord
+fps 20
+
+keycast on
+keycast-width 44
+caption gittools.nvim  ·  Gittools graph --all
+sleep 400ms
+
+key :Gittools graph --all<CR>
+wait v1.0.0
+sleep 800ms
+
+key j
+key j
+key j
+sleep 300ms
+key K
+wait Author:
+sleep 1200ms
+key <Esc>
+sleep 400ms
+
+key G
+sleep 300ms
+key c
+wait »
+sleep 500ms
+key gg
+sleep 400ms
+
+key <CR>
+wait app.lua
+sleep 1200ms
+key ]f
+wait config.lua
+sleep 1200ms
