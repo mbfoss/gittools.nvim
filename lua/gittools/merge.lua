@@ -129,9 +129,7 @@ local function _end_merge()
         end
     end
 
-    for _, path in ipairs(session.tmp) do
-        pcall(vim.uv.fs_unlink, path)
-    end
+    for _, path in ipairs(session.tmp) do pcall(vim.uv.fs_unlink, path) end
 end
 
 --- Close the active merge session, if any (e.g. on VimLeavePre).
@@ -676,11 +674,30 @@ function M.merge(opts)
     end
 
     -- Open $MERGED as a real, writable file buffer: resolving is an edit, and
-    -- `:w` is how it lands.
+    -- `:w` is how it lands. Through `:edit` rather than `bufload()`, so an
+    -- existing swap file gets Neovim's own ATTENTION dialog (and any
+    -- SwapExists handling the user has set up) -- a merge that crashed halfway
+    -- is one worth (R)ecovering. `:hide` keeps a modified buffer in the window
+    -- from blocking the switch.
+    local existed = vim.fn.bufexists(sides.merged_path) == 1
     local buf = vim.fn.bufadd(sides.merged_path)
-    vim.fn.bufload(buf)
+    local err
     if vim.api.nvim_get_current_buf() ~= buf then
-        vim.api.nvim_win_set_buf(0, buf)
+        local ok, e = pcall(vim.cmd, "hide edit " .. vim.fn.fnameescape(sides.merged_path))
+        if not ok then err = e end
+    end
+    if vim.api.nvim_get_current_buf() ~= buf or not vim.api.nvim_buf_is_loaded(buf) then
+        -- (Q)uit or (A)bort at the ATTENTION dialog -- the user's own call,
+        -- nothing to report -- or the edit failed.
+        err = err and tostring(err)
+        if err and not (err:find("E325", 1, true) or err:find("Keyboard interrupt", 1, true)) then
+            _notify(err, vim.log.levels.ERROR)
+        end
+        if not existed and not vim.api.nvim_buf_is_loaded(buf) then
+            pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+        for _, path in ipairs(session.tmp) do pcall(vim.uv.fs_unlink, path) end
+        return
     end
 
     session.buf   = buf
