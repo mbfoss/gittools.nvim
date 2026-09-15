@@ -58,6 +58,26 @@ function M.close_win(win)
     end
 end
 
+--- Load `path` as its own file buffer, without showing it. An existing swap
+--- file (a crashed session, or another Neovim editing the file) makes
+--- `bufload()` raise E325 even though the buffer loads fine -- it is the
+--- ATTENTION dialog's "Edit anyway", on a fresh swap file of its own -- so
+--- swallow just that error and say so. A buffer that is already loaded is
+--- returned untouched: it is the user's, swap file and all.
+---@param path string
+---@return integer bufnr
+function M.file_buf(path)
+    local buf = vim.fn.bufadd(path)
+    if vim.api.nvim_buf_is_loaded(buf) then return buf end
+    local ok, err = pcall(vim.fn.bufload, buf)
+    if not ok then
+        if not tostring(err):find("E325", 1, true) then error(err, 0) end
+        vim.notify(("[gittools] Swap file exists for %s; opened anyway (see :h :recover)")
+            :format(vim.fn.fnamemodify(path, ":~:.")), vim.log.levels.WARN)
+    end
+    return buf
+end
+
 ---@param listed boolean
 ---@param buffer_options vim.bo?
 ---@param on_delete function?

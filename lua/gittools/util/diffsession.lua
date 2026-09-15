@@ -399,10 +399,7 @@ local function _side_buf(session, root, side, rel, side_label, filetype)
     if not path then
         return _make_side_buf(session, root, side, rel, side_label, filetype)
     end
-    local buf = vim.fn.bufadd(path)
-    vim.bo[buf].swapfile = false
-    vim.fn.bufload(buf)
-    return buf
+    return ui.file_buf(path)
 end
 
 --- A read-only scratch buffer naming the commit one side of a submodule entry
