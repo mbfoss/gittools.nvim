@@ -2,6 +2,7 @@ local M          = {}
 
 local git        = require("gittools.util.git")
 local ui         = require("gittools.util.ui")
+local keyhelp    = require("gittools.util.keyhelp")
 
 --- The generic engine behind the side-by-side diff UI: it takes a flat list of
 --- "items" (each describing a file's status and how to fetch its left/right
@@ -617,7 +618,7 @@ local function _make_list_buf(session)
     return buf
 end
 
---- Open the file list in a bottom split and wire the `<CR>` / `q` maps.
+--- Open the file list in a bottom split and wire the `<CR>` / `o` maps.
 ---@param session GitTools.DiffSession
 local function _open_list(session)
     local buf = _make_list_buf(session)
@@ -682,6 +683,11 @@ local function _open_list(session)
         -- would be a cycle.
         require("gittools.diff").diff_submodule(entry.data)
     end, { buffer = buf, desc = "Compare the submodule under the cursor in its own tab" })
+
+    keyhelp.map(buf, { "<CR>", "o" }, {
+        { "]f", "Show the next file's diff, from anywhere in the tab" },
+        { "[f", "Show the previous file's diff, from anywhere in the tab" },
+    })
 end
 
 ---@class GitTools.DiffOpts

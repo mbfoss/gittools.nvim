@@ -3,6 +3,7 @@ local M        = {}
 local git      = require("gittools.util.git")
 local difftool = require("gittools.diff")
 local hover    = require("gittools.util.hover")
+local keyhelp  = require("gittools.util.keyhelp")
 
 --- `:GitTool blame` -- annotate the current buffer with per-line commit info
 --- in a scroll-bound sidebar, fugitive-style. The buffer's *live* contents are
@@ -10,9 +11,11 @@ local hover    = require("gittools.util.hover")
 --- show up as "Not committed". In the sidebar: the commit summary is echoed as
 --- the cursor moves, `<CR>` diffs the commit under the cursor against its
 --- parent (via `gittools.diff`), `K` shows that commit's details in a float,
---- and `q` closes the sidebar. The annotations are a snapshot, so the session
---- ends as soon as they could go stale: either window closing, the file being
---- edited, reloaded or replaced in its window, and the buffer being deleted.
+--- `R` re-blames the file as it was just before the commit under the cursor,
+--- and `<BS>` steps back out of that. The annotations are a snapshot, so the
+--- session ends as soon as they could go stale: either window closing, the
+--- file being edited, reloaded or replaced in its window, and the buffer being
+--- deleted.
 
 local _EMPTY_TREE   = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 local _MAX_AUTHOR_W = 20
@@ -27,16 +30,37 @@ end
 
 --- One blamed line.
 ---@class GitTools.BlameEntry
----@field hash    string
----@field author  string
----@field time    integer
----@field summary string
+---@field hash      string
+---@field orig_lnum integer  the line's number in `hash`'s version of the file
+---@field author    string
+---@field time      integer
+---@field summary   string
+---@field prev_hash string?  the commit `hash` changed the line from, and the
+---@field prev_path string?  file's path there; unset when the line is as old
+---                          as the file (or uncommitted)
+
+--- One level of the blame: the live buffer at the bottom, and above it one per
+--- `R`, each a read-only copy of the file at an older commit.
+---@class GitTools.BlameLayer
+---@field buf     integer               shown in the file window at this level
+---@field entries GitTools.BlameEntry[]  by line
+---@field label   string                what the sidebar is named after, `path`
+---                                     or `rev:path`
+---@field view    table?                the file window's view, saved when a
+---                                     level is pushed on top of this one
 
 --- The active blame session. Only one exists at a time. nil when idle.
 ---@class GitTools.BlameSession
 ---@field group     integer
+---@field root      string
+---@field rel       string               the live file's path in the repo
 ---@field file_win  integer?
----@field file_buf  integer
+---@field file_buf  integer              the live buffer blame was started on
+---@field shown_buf integer              the buffer the file window is meant to
+---                                      be showing: `file_buf`, or a history
+---                                      buffer after a `R`
+---@field stack     GitTools.BlameLayer[] `stack[1]` is `file_buf`'s level
+---@field entries   GitTools.BlameEntry[] the top level's, as shown in the sidebar
 ---@field blame_win integer?
 ---@field blame_buf integer
 ---@field saved     table<string, any>  file-window options to restore on close
@@ -63,6 +87,16 @@ local function _end_blame()
     pcall(vim.api.nvim_del_augroup_by_id, s.group)
 
     if s.file_win and vim.api.nvim_win_is_valid(s.file_win) then
+        -- Deep in the history, the window shows a copy that is about to go;
+        -- hand it back the file it was blaming.
+        if vim.api.nvim_win_get_buf(s.file_win) ~= s.file_buf
+            and vim.api.nvim_win_get_buf(s.file_win) == s.shown_buf then
+            if vim.api.nvim_buf_is_valid(s.file_buf) then
+                vim.api.nvim_win_set_buf(s.file_win, s.file_buf)
+            else
+                vim.api.nvim_win_call(s.file_win, function() vim.cmd("enew") end)
+            end
+        end
         _restore_opts(s.file_win, s.saved)
     end
 
@@ -84,6 +118,11 @@ local function _end_blame()
     end
     if vim.api.nvim_buf_is_valid(s.blame_buf) then
         pcall(vim.api.nvim_buf_delete, s.blame_buf, { force = true })
+    end
+    for i = 2, #s.stack do
+        if vim.api.nvim_buf_is_valid(s.stack[i].buf) then
+            pcall(vim.api.nvim_buf_delete, s.stack[i].buf, { force = true })
+        end
     end
 end
 
@@ -110,9 +149,10 @@ local function _parse_blame(out)
         if line:sub(1, 1) == "\t" then
             if cur then entries[#entries + 1] = cur end
         else
-            local hash = line:match("^(%x+) %d+ %d+")
+            local hash, orig = line:match("^(%x+) (%d+) %d+")
             if hash and #hash >= 8 then
-                cur = { hash = hash, author = "", time = 0, summary = "" }
+                cur = { hash = hash, orig_lnum = tonumber(orig) --[[@as integer]],
+                    author = "", time = 0, summary = "" }
             elseif cur then
                 local key, val = line:match("^([%w%-]+) (.*)$")
                 if key == "author" then
@@ -121,6 +161,8 @@ local function _parse_blame(out)
                     cur.time = tonumber(val) or 0
                 elseif key == "summary" then
                     cur.summary = val
+                elseif key == "previous" then
+                    cur.prev_hash, cur.prev_path = val:match("^(%x+) (.*)$")
                 end
             end
         end
@@ -230,6 +272,179 @@ local function _bind_windows(session)
     end
 end
 
+--- The file buffer leaving its window (`:edit other`, `:bdelete`, a `:close` we
+--- didn't see) leaves the sidebar annotating something that is no longer on
+--- screen. Re-check once the layout has settled: the same event fires when the
+--- buffer is merely dropped from *another* window, which is not our business,
+--- and when `_show_layer` swaps one level's buffer for another's.
+---@param session GitTools.BlameSession
+local function _check_file_win(session)
+    vim.schedule(function()
+        if _session ~= session then return end
+        local fw = session.file_win
+        if fw and vim.api.nvim_win_is_valid(fw)
+            and vim.api.nvim_win_get_buf(fw) == session.shown_buf then
+            return
+        end
+        _end_blame()
+    end)
+end
+
+--- Write `entries` into the sidebar and fit its width to them.
+---@param session GitTools.BlameSession
+---@param entries GitTools.BlameEntry[]
+local function _fill_sidebar(session, entries)
+    local lines, width = _format_lines(entries)
+    local buf = session.blame_buf
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+    vim.bo[buf].modified   = false
+    vim.api.nvim_buf_clear_namespace(buf, _ns, 0, -1)
+    _highlight(buf, entries)
+    session.entries = entries
+    if session.blame_win and vim.api.nvim_win_is_valid(session.blame_win) then
+        vim.api.nvim_win_set_width(session.blame_win, width + 1)
+    end
+end
+
+--- Show `layer` -- its file text in the file window, its annotations in the
+--- sidebar -- with both windows on `view`'s line and scrolled alike.
+---@param session GitTools.BlameSession
+---@param layer   GitTools.BlameLayer
+---@param view    table  a `winsaveview()`, or just `lnum` and `topline`
+local function _show_layer(session, layer, view)
+    local fw, bw = session.file_win, session.blame_win
+    ---@cast fw integer
+    ---@cast bw integer
+    -- Before the swap: it is what the BufWinLeave check below compares with.
+    session.shown_buf = layer.buf
+    vim.api.nvim_win_set_buf(fw, layer.buf)
+    -- A buffer new to the window may bring window options of its own.
+    vim.wo[fw].scrollbind = true
+    vim.wo[fw].cursorbind = true
+    vim.wo[fw].wrap       = false
+    vim.wo[fw].foldenable = false
+    _fill_sidebar(session, layer.entries)
+    pcall(vim.api.nvim_buf_set_name, session.blame_buf, "gittools://blame/" .. layer.label)
+
+    local n = #layer.entries
+    local lnum = math.max(1, math.min(view.lnum or 1, n))
+    local top = math.max(1, math.min(view.topline or lnum, lnum))
+    local restore = vim.tbl_extend("force", view, { lnum = lnum, topline = top })
+    vim.api.nvim_win_call(fw, function() vim.fn.winrestview(restore) end)
+    vim.api.nvim_win_call(bw, function()
+        vim.fn.winrestview({ lnum = lnum, col = 0, topline = top })
+        vim.cmd("syncbind")
+    end)
+end
+
+--- The file window's view expressed from the sidebar's cursor, which is where
+--- the user is when pressing `R` / `<BS>`.
+---@param session GitTools.BlameSession
+---@return integer lnum
+---@return integer offset  cursor line minus the window's top line
+local function _sidebar_pos(session)
+    -- `nvim_win_call` hands back only the first of several return values.
+    local pos = vim.api.nvim_win_call(session.blame_win, function()
+        return { vim.fn.line("."), vim.fn.line("w0") }
+    end)
+    return pos[1], pos[1] - pos[2]
+end
+
+--- Re-blame the file as it stood just before the commit that last touched the
+--- line under the cursor, stepping past that commit to whatever the line was
+--- before it. The file window switches to a read-only copy of that version,
+--- under its path there, so renames are followed. The cursor lands where the
+--- line sat in the commit's own version, the closest thing the older one has
+--- to it.
+---@param session GitTools.BlameSession
+local function _reblame(session)
+    local lnum, offset = _sidebar_pos(session)
+    local e = session.entries[lnum]
+    if not e then return end
+    if _is_uncommitted(e) then
+        _notify("Line is not committed yet")
+        return
+    end
+    if not e.prev_hash then
+        _notify(("Nothing older to blame: %s added this line with the file")
+            :format(e.hash:sub(1, 7)))
+        return
+    end
+
+    local rev, path = e.prev_hash, e.prev_path
+    local blob, err = git.run_raw(session.root, { "show", rev .. ":" .. path })
+    local out
+    if blob then
+        out, err = git.run_raw(session.root, { "blame", "--line-porcelain", rev, "--", path })
+    end
+    if not out then
+        _notify(err ~= "" and err or "git blame failed", vim.log.levels.ERROR)
+        return
+    end
+    local entries = _parse_blame(out)
+    if #entries == 0 then
+        _notify("Nothing to blame at " .. rev:sub(1, 7))
+        return
+    end
+
+    local ft = vim.bo[session.shown_buf].filetype
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false,
+        vim.split((blob:gsub("\n$", "")), "\n", { plain = true }))
+    vim.bo[buf].buftype    = "nofile"
+    -- Kept while a later level covers it, so `<BS>` can come back to it.
+    vim.bo[buf].bufhidden  = "hide"
+    vim.bo[buf].swapfile   = false
+    vim.bo[buf].filetype   = ft
+    vim.bo[buf].modifiable = false
+    vim.bo[buf].modified   = false
+    pcall(vim.api.nvim_buf_set_name, buf, ("gittools://%s/%s"):format(rev:sub(1, 7), path))
+
+    local below = session.stack[#session.stack]
+    -- The sidebar's line rather than the file window's: the cursor is bound
+    -- only to moves the user makes, so the two can differ.
+    below.view = vim.tbl_extend("force",
+        vim.api.nvim_win_call(session.file_win, vim.fn.winsaveview),
+        { lnum = lnum, topline = lnum - offset })
+    local layer = { buf = buf, entries = entries, label = rev:sub(1, 7) .. ":" .. path }
+    session.stack[#session.stack + 1] = layer
+
+    -- Losing this copy from the window ends the session the way losing the
+    -- live buffer does; `_pop` clears these before it drops the copy itself.
+    vim.api.nvim_create_autocmd("BufWinLeave", {
+        group    = session.group,
+        buffer   = buf,
+        callback = function() _check_file_win(session) end,
+    })
+    vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+        group    = session.group,
+        buffer   = buf,
+        callback = function() _end_soon(session) end,
+    })
+
+    local at = math.max(1, e.orig_lnum)
+    _show_layer(session, layer, { lnum = at, topline = at - offset })
+    vim.api.nvim_echo({ { ("Blaming %s at %s  (<BS> to go back)"):format(path, rev:sub(1, 7)),
+        "Normal" } }, false, {})
+end
+
+--- Step back down one level to the version `R` came from, where the cursor
+--- was then.
+---@param session GitTools.BlameSession
+local function _pop(session)
+    if #session.stack == 1 then
+        _notify("Already blaming the working copy")
+        return
+    end
+    local layer = table.remove(session.stack)
+    local below = session.stack[#session.stack]
+    _show_layer(session, below, below.view or { lnum = 1 })
+    vim.api.nvim_clear_autocmds({ group = session.group, buffer = layer.buf })
+    pcall(vim.api.nvim_buf_delete, layer.buf, { force = true })
+end
+
 --- Annotate the current buffer with `git blame` in a scroll-bound sidebar.
 function M.blame()
     local buf = vim.api.nvim_get_current_buf()
@@ -314,8 +529,13 @@ function M.blame()
     local group = vim.api.nvim_create_augroup("gittools.blame", { clear = true })
     local session = {
         group     = group,
+        root      = root,
+        rel       = rel,
         file_win  = file_win,
         file_buf  = buf,
+        shown_buf = buf,
+        stack     = { { buf = buf, entries = entries, label = rel } },
+        entries   = entries,
         blame_win = blame_win,
         blame_buf = blame_buf,
         saved     = {},
@@ -344,25 +564,10 @@ function M.blame()
         })
     end
 
-    -- The blamed buffer leaving its window (`:edit other`, `:bdelete`, a
-    -- `:close` we didn't see) leaves the sidebar annotating something that is
-    -- no longer on screen. Re-check once the layout has settled: the same event
-    -- fires when the buffer is merely dropped from *another* window, and that
-    -- is not our business.
     vim.api.nvim_create_autocmd("BufWinLeave", {
         group    = group,
         buffer   = buf,
-        callback = function()
-            vim.schedule(function()
-                if _session ~= session then return end
-                local fw = session.file_win
-                if fw and vim.api.nvim_win_is_valid(fw)
-                    and vim.api.nvim_win_get_buf(fw) == session.file_buf then
-                    return
-                end
-                _end_blame()
-            end)
-        end,
+        callback = function() _check_file_win(session) end,
     })
     -- Wiping the buffer while it is hidden never passes through BufWinLeave.
     vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
@@ -390,7 +595,7 @@ function M.blame()
         buffer   = blame_buf,
         callback = function()
             local lnum = vim.api.nvim_win_get_cursor(0)[1]
-            local e = entries[lnum]
+            local e = session.entries[lnum]
             if not e then return end
             local msg = _is_uncommitted(e) and "Not committed yet" or e.summary
             vim.api.nvim_echo({ { msg, "Normal" } }, false, {})
@@ -399,15 +604,23 @@ function M.blame()
 
     vim.keymap.set("n", "<CR>", function()
         local lnum = vim.api.nvim_win_get_cursor(0)[1]
-        local e = entries[lnum]
+        local e = session.entries[lnum]
         if e then _diff_commit(root, e) end
     end, { buffer = blame_buf, desc = "Diff commit under cursor" })
 
     vim.keymap.set("n", "K", function()
         local lnum = vim.api.nvim_win_get_cursor(0)[1]
-        local e = entries[lnum]
+        local e = session.entries[lnum]
         if e then _show_details(root, e) end
     end, { buffer = blame_buf, desc = "Show details of commit under cursor" })
+
+    vim.keymap.set("n", "R", function() _reblame(session) end,
+        { buffer = blame_buf, desc = "Re-blame at the parent of the commit under cursor" })
+
+    vim.keymap.set("n", "<BS>", function() _pop(session) end,
+        { buffer = blame_buf, desc = "Back to the blame R came from" })
+
+    keyhelp.map(blame_buf, { "<CR>", "K", "R", "<BS>" })
 end
 
 return M

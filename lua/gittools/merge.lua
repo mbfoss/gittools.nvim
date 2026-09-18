@@ -11,7 +11,9 @@ local git = require("gittools.util.git")
 ---                                                 other three sides come from
 ---                                                 its index stages
 ---   :GitTool merge                                as above, for the current
----                                                 buffer's file
+---                                                 buffer's file; when that
+---                                                 isn't conflicted, pick one
+---                                                 of the files that are
 ---
 --- The view is the `$MERGED` file itself -- a normal, editable, saveable buffer
 --- -- with each conflict region painted the way VSCode paints them: a Current
@@ -231,7 +233,8 @@ local function _render(session)
         end
     end
 
-    for _, h in ipairs(session.hunks) do
+    local total = #session.hunks
+    for i, h in ipairs(session.hunks) do
         band(h.ours, "GitToolsMergeCurrent")
         band(h.base, "GitToolsMergeBase")
         band(h.theirs, "GitToolsMergeIncoming")
@@ -248,6 +251,7 @@ local function _render(session)
         for _, lnum in ipairs(markers) do
             local virt = { { "  " .. labels[lnum], "GitToolsMergeLabel" } }
             if lnum == h.s_lnum then
+                virt[#virt + 1] = { ("  [%d/%d]"):format(i, total), "GitToolsMergeLabel" }
                 virt[#virt + 1] = { "  ·  xc current · xi incoming · xb both · xa base · xd diff",
                     "GitToolsMergeHint" }
             end
@@ -267,8 +271,27 @@ end
 ---@param session GitTools.MergeSession
 local function _refresh(session)
     if not vim.api.nvim_buf_is_valid(session.buf) then return end
+    local before = #session.hunks
     session.hunks = _parse(vim.api.nvim_buf_get_lines(session.buf, 0, -1, false))
     _render(session)
+    -- Said on the edit that clears the last one, whichever way it went: one of
+    -- ours or the user's own.
+    if before > 0 and #session.hunks == 0 then
+        _notify("All conflicts resolved; :w to save")
+    end
+end
+
+--- Echo `msg` without adding to the message history: position and progress
+--- chatter, not worth a notification.
+---@param msg string
+local function _echo(msg)
+    vim.api.nvim_echo({ { msg, "Normal" } }, false, {})
+end
+
+---@param n integer
+---@return string
+local function _conflicts(n)
+    return n == 1 and "1 conflict" or (n .. " conflicts")
 end
 
 --- Base text for hunk `idx`, for the common case where `merge.conflictStyle` is
@@ -367,6 +390,9 @@ local function _accept(session, which)
     end
 
     _replace(session, h, lines)
+    if #session.hunks > 0 then
+        _echo(_conflicts(#session.hunks) .. " left")
+    end
 end
 
 --- Jump to the next (`dir` 1) or previous (`dir` -1) conflict, wrapping.
@@ -382,17 +408,18 @@ local function _jump(session, dir)
     local lnum = vim.api.nvim_win_get_cursor(0)[1]
     local target
     if dir > 0 then
-        for _, h in ipairs(hunks) do
-            if h.s_lnum > lnum then target = h break end
+        for i, h in ipairs(hunks) do
+            if h.s_lnum > lnum then target = i break end
         end
-        target = target or hunks[1]
+        target = target or 1
     else
         for i = #hunks, 1, -1 do
-            if hunks[i].e_lnum < lnum then target = hunks[i] break end
+            if hunks[i].e_lnum < lnum then target = i break end
         end
-        target = target or hunks[#hunks]
+        target = target or #hunks
     end
-    vim.api.nvim_win_set_cursor(0, { target.s_lnum, 0 })
+    vim.api.nvim_win_set_cursor(0, { hunks[target].s_lnum, 0 })
+    _echo(("Conflict %d of %d"):format(target, #hunks))
 end
 
 --- A read-only scratch side for the three-way split.
@@ -553,23 +580,68 @@ local function _spill(session, blob)
     return path
 end
 
---- The `$MERGED` file for the no-argument form: whatever the current buffer is
---- editing.
+--- The file the current buffer is editing, or nil when it is not a normal
+--- file buffer.
 ---@return string?
 local function _current_file()
     local buf = vim.api.nvim_get_current_buf()
-    if vim.bo[buf].buftype ~= "" then
-        _notify("GitTool merge needs a normal file buffer, or a file argument",
-            vim.log.levels.WARN)
-        return nil
-    end
-
+    if vim.bo[buf].buftype ~= "" then return nil end
     local abs = vim.api.nvim_buf_get_name(buf)
-    if abs == "" then
-        _notify("Current buffer has no file name", vim.log.levels.WARN)
-        return nil
+    return abs ~= "" and vim.fn.fnamemodify(abs, ":p") or nil
+end
+
+--- The repository's conflicted files, relative to `root`, in git's order.
+---@param root string
+---@return string[]
+local function _conflicted(root)
+    return git.lines((git.run(root, {
+        "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=U",
+    })))
+end
+
+--- How many conflict regions `abs` still holds: from its buffer when it is
+--- loaded, which may be ahead of the disk, else from the file.
+---@param abs string
+---@return integer
+local function _count_conflicts(abs)
+    local buf = vim.fn.bufnr(abs)
+    local lines
+    if buf ~= -1 and vim.api.nvim_buf_is_loaded(buf) then
+        lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    else
+        local ok, read = pcall(vim.fn.readfile, abs)
+        lines = ok and read or {}
     end
-    return vim.fn.fnamemodify(abs, ":p")
+    return #_parse(lines)
+end
+
+--- Offer the conflicted files through `vim.ui.select`, each with the number of
+--- conflicts it has left, and open the one picked. A file stays conflicted to
+--- git until it is staged, so one already resolved and saved is still listed,
+--- marked as such.
+---@param root  string
+---@param files string[]  relative to `root`
+local function _pick(root, files)
+    local items, width = {}, 0
+    for _, rel in ipairs(files) do
+        local abs = vim.fs.joinpath(root, rel)
+        local n = _count_conflicts(abs)
+        items[#items + 1] = {
+            abs    = abs,
+            rel    = rel,
+            status = n > 0 and _conflicts(n) or "resolved, not staged",
+        }
+        width = math.max(width, vim.fn.strdisplaywidth(rel))
+    end
+    vim.ui.select(items, {
+        prompt      = "Conflicted files",
+        format_item = function(item)
+            return item.rel .. string.rep(" ", width - vim.fn.strdisplaywidth(item.rel))
+                .. "  " .. item.status
+        end,
+    }, function(item)
+        if item then M.merge({ paths = { item.abs } }) end
+    end)
 end
 
 --- Resolve the four sides from `abs`'s index stages: 1 = base, 2 = ours,
@@ -631,6 +703,32 @@ end
 ---@param opts GitTools.MergeOpts?
 function M.merge(opts)
     opts = opts or {}
+
+    local paths = opts.paths or {}
+    if #paths == 0 then
+        -- The current buffer's file when it is conflicted; otherwise the ones
+        -- that are, straight into the only one or through a picker.
+        local cur = _current_file()
+        local root = git.root(cur and vim.fs.dirname(cur) or nil)
+        if not root then
+            _notify("Not inside a git repository", vim.log.levels.WARN)
+            return
+        end
+        local files = _conflicted(root)
+        local rel = cur and git.relpath(root, cur)
+        if rel and vim.tbl_contains(files, rel) then
+            paths = { cur }
+        elseif #files == 0 then
+            _notify("No conflicted files")
+            return
+        elseif #files == 1 then
+            paths = { vim.fs.joinpath(root, files[1]) }
+        else
+            _pick(root, files)
+            return
+        end
+    end
+
     _end_merge()
 
     local session = {
@@ -640,7 +738,6 @@ function M.merge(opts)
         base_tried = false,
     }
 
-    local paths = opts.paths or {}
     local sides
     if #paths == 4 then
         local base = vim.fn.fnamemodify(paths[2], ":p")
@@ -655,15 +752,10 @@ function M.merge(opts)
         }
     else
         ---@type string?
-        local abs
-        if paths[1] then
-            abs = vim.fn.fnamemodify(paths[1], ":p")
-            if vim.fn.filereadable(abs) == 0 then
-                _notify("No such file: " .. paths[1], vim.log.levels.WARN)
-                abs = nil
-            end
-        else
-            abs = _current_file()
+        local abs = vim.fn.fnamemodify(paths[1], ":p")
+        if vim.fn.filereadable(abs) == 0 then
+            _notify("No such file: " .. paths[1], vim.log.levels.WARN)
+            abs = nil
         end
         sides = abs and _sides_from_index(session, abs) or nil
     end
@@ -713,6 +805,7 @@ function M.merge(opts)
         _notify("No conflict markers found in " .. vim.fn.fnamemodify(sides.merged_path, ":."))
     else
         vim.api.nvim_win_set_cursor(session.win, { session.hunks[1].s_lnum, 0 })
+        _echo(_conflicts(#session.hunks) .. " in " .. vim.fn.fnamemodify(sides.merged_path, ":."))
     end
 
     -- Repaint on every edit so the bands follow both our resolutions and the

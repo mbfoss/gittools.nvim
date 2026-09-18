@@ -21,6 +21,7 @@ lua/gittools/util/
     ui.lua                   tab claiming, scratch buffers, window teardown
     usercmd.lua              user-command registration + subcommand completion
     hover.lua                LSP-style floating preview
+    keyhelp.lua              `g?`: a view's keys, listed in a hover
 ```
 
 `init.lua` owns only argument parsing and completion; every feature has its own
@@ -181,11 +182,29 @@ standing in for whichever side is the live working tree. `_GITLINK_LINE` in
 that single line), and the submodule is then resolved back to the real
 repository the command was run in, so `c` behaves as it does in `GitTool diff`.
 
+## blame
+
+The sidebar and the file window are scroll- and cursor-bound, and the session
+is a stack of levels: `stack[1]` is the live buffer, blamed through
+`--contents -`, and each `R` pushes a read-only copy of the file at the
+`previous` commit that `--line-porcelain` reports for the line (the parent the
+blame passed through, and the file's path there, which is how renames are
+followed). `<BS>` pops one. The history copies are `bufhidden=hide`
+rather than `wipe`, since one that a later level covers has to survive for
+`<BS>` to come back to it. They are deleted when popped or at teardown.
+
+`shown_buf` is the buffer the file window is meant to show at the current
+level, and the `BufWinLeave` check compares against it rather than against the
+live buffer, since `R` / `<BS>` swap the window's buffer themselves. `_pop` clears a
+level's autocmds before deleting its copy, so that deletion doesn't read as the
+user closing it.
+
 ## merge
 
 Three entry points, one implementation: the four-file mergetool convention, a
 single file (the other three sides recovered from its index stages), or the
-current buffer. The view is `$MERGED` itself, a normal, editable, saveable
+current buffer (or, when that isn't conflicted, one picked from
+`git diff --diff-filter=U` through `vim.ui.select`). The view is `$MERGED` itself, a normal, editable, saveable
 buffer, with conflict regions painted as Current / Base / Incoming bands.
 
 This module is as read-only toward git as the rest of the plugin: accepting a
@@ -293,6 +312,17 @@ sections only.
   (`scrollbind`, `cursorbind`, `wrap`, `spell`, …), since a new split inherits them
   from whatever it split off of, which otherwise scroll-links a picker to a
   diff pane or spell-checks a list of hashes.
+- No view maps `q`: it stays the user's (macro recording), and views close
+  the way any window does.
+- The plugin's own views -- the log, the diff file list, the blame sidebar,
+  the `diffthis` git side -- answer `g?` with a hover listing their keys
+  (`keyhelp.map`), each view naming its own keys: other plugins map into
+  these buffers too (a key-hint plugin's triggers), so reading every map off
+  the buffer lists theirs as well. In a window too short for a hover (the diff
+  file list), the list opens in a float over the window instead,
+  read off the buffer's own maps when pressed, so every map there needs a
+  `desc`: that is its help text. `$MERGED` gets none, since `g?` is rot13 on
+  a real file, and the band hints already name its keys.
 - Generated buffers are `buftype=nofile` scratch buffers via
   `ui.create_scratch_buffer`, unlisted ones with `bufhidden=wipe`.
 - Sessions clean themselves up on any event that could make their snapshot

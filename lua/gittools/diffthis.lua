@@ -1,6 +1,7 @@
 local M   = {}
 
-local git = require("gittools.util.git")
+local git     = require("gittools.util.git")
+local keyhelp = require("gittools.util.keyhelp")
 
 --- The single-file feature behind `:GitTool diffthis [<rev>]`. It diffs the
 --- *current buffer* -- including unsaved edits -- against its git version using
@@ -132,6 +133,11 @@ local function _diffthis(opts)
         ("gittools.diffthis.%d"):format(base), { clear = true })
     local session = { buf = buf, base = base, group = group, cur_win = cur_win, base_win = base_win }
     _session = session
+
+    keyhelp.map(base, {}, {
+        { "]c", "Jump to the next change" },
+        { "[c", "Jump to the previous change" },
+    })
     vim.api.nvim_create_autocmd("BufWipeout", {
         group    = group,
         buffer   = base,

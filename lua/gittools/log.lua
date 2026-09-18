@@ -7,6 +7,7 @@ local git      = require("gittools.util.git")
 local difftool = require("gittools.diff")
 local ui       = require("gittools.util.ui")
 local hover    = require("gittools.util.hover")
+local keyhelp  = require("gittools.util.keyhelp")
 
 --- `:GitTool log [<opt>...] [<rev>] [-- <path>]` -- commit history as a flat
 --- list in a tab of its own. `:GitTool graph [<opt>...] [<rev>] [-- <path>]` --
@@ -22,7 +23,7 @@ local hover    = require("gittools.util.hover")
 --- against its first parent (via `gittools.diff`); `c` marks the commit under
 --- the cursor as that base, one at a time, shown in the list with a `»`; `K`
 --- shows the commit's details -- header, message and diffstat -- in a float. The
---- diff opens in its own tab and the list stays put behind it, so `q` on the
+--- diff opens in its own tab and the list stays put behind it, so closing the
 --- diff comes back to the same place in the history.
 
 local _LIMIT      = 500
@@ -457,7 +458,7 @@ local function _show_details(session, entry)
 end
 
 --- Show `session.entries` in a scratch buffer and wire up the `<CR>` / `c` /
---- `K` / `q` maps. The view takes a whole tab -- a new one unless the current tab is
+--- `K` maps. The view takes a whole tab -- a new one unless the current tab is
 --- an unused editor (see `ui.claim_tab`) -- rather than a split, so it can stay
 --- open alongside the diffs launched from it without competing for room.
 ---@param session GitTools.LogSession
@@ -520,6 +521,8 @@ local function _show(session)
         if not entry then return end
         _show_details(session, entry)
     end, { buffer = buf, desc = "Show commit details" })
+
+    keyhelp.map(buf, { "<CR>", "c", "K" })
 end
 
 --- Options that would break parsing (they replace or extend the `--pretty`
@@ -762,6 +765,11 @@ end
 --- given as an argument, the way `gittools.diffthis` is the diff for one
 --- buffer. Unlike `diffthis` the buffer's unsaved edits play no part here:
 --- git only knows the commits the file has on disk.
+---
+--- The file is followed across renames (`--follow`): the question is "what
+--- happened to this file", and the answer should not stop at the commit that
+--- last moved it. It goes ahead of the user's options, so a `--no-follow` of
+--- theirs still wins.
 ---@param opts GitTools.LogOpts?  `rev` and `args` only; `path`/`unsplit` play
 ---                       no part, the path being the current buffer's file
 function M.logthis(opts)
@@ -780,7 +788,7 @@ function M.logthis(opts)
     end
 
     _run_log("logthis", { rev = opts.rev, path = vim.fn.fnamemodify(abs, ":p"), args = opts.args },
-        { "--pretty=format:%H\t%P\t%ad\t%an\t%s" }, _parse_log, true)
+        { "--follow", "--pretty=format:%H\t%P\t%ad\t%an\t%s" }, _parse_log, true)
 end
 
 --- List stashes in an interactive tab of its own, same interaction as `M.log`

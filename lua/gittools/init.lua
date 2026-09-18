@@ -251,6 +251,8 @@ function M.complete(_, rest, arg_lead)
         local out = {}
         vim.list_extend(out, _LOG_OPTS)
         out[#out + 1] = "--reverse"
+        -- `--follow` is on by default here; this turns it off.
+        out[#out + 1] = "--no-follow"
         vim.list_extend(out, git.refs())
         return out
     elseif sub == "merge" then
