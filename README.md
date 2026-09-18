@@ -91,6 +91,7 @@ The layout is a file list in a bottom split driving a side-by-side diff:
 | `<CR>` | show the file under the cursor and jump into the diff |
 | `]f` / `[f` | show the next / previous file, from anywhere in the tab |
 | `o` | on a submodule row, open the submodule's own diff in a new tab |
+| `g?` | list these keys (on the command line when the list is too short for a float) |
 
 `]f` / `[f` step through the file list of the session in the current tab, so two
 diffs open at once stay independent.
@@ -115,7 +116,8 @@ the index; pass a revision to compare against that instead:
 ```
 
 The git side is a read-only scratch buffer on the left; the live buffer is on
-the right, so the diff tracks edits as you type.
+the right, so the diff tracks edits as you type. `g?` in the git side lists
+the keys.
 
 ## `GitTool log` <!-- tag: log -->
 
@@ -168,6 +170,7 @@ back as git's own error.
 | `<CR>` | diff the commit under the cursor (against its first parent, or the marked base) |
 | `c` | mark / unmark the commit under the cursor as the comparison base |
 | `K` | show the commit's header, message and diffstat in a float |
+| `g?` | list these keys in a float |
 
 `GitTool stashlist` is the same view over `git stash list`, with each entry
 labelled by the `stash@{N}` selector you would type at `git stash
@@ -235,8 +238,9 @@ the only positional it takes, and a `--` or a path of your own is not accepted.
 Unsaved edits play no part here -- unlike `diffthis`, this is history, and git
 only knows the commits the file has on disk.
 
-The file is followed by its current path only, as `git log <path>` does: pass
-`--follow` to track it across renames.
+The file is followed across renames, as with `git log --follow`, so its history
+doesn't stop at the commit that last moved it. Pass `--no-follow` to see only
+the commits made under its current path.
 
 ## `GitTool graph` <!-- tag: graph -->
 
@@ -283,6 +287,16 @@ commit's summary.
 | --- | --- |
 | `<CR>` | diff the commit under the cursor against its parent |
 | `K` | show that commit's details in a float |
+| `R` | re-blame the file as it was just before that commit |
+| `<BS>` | go back to the blame `R` came from |
+| `g?` | list these keys in a float |
+
+`R` goes back in time past the commit that last touched a line, to see
+what the line was before that commit and who wrote it. The file window
+switches to a read-only copy of the file at that commit's parent, under its path
+there, so renames are followed, and the sidebar blames that copy. Repeat it to
+keep going back; `<BS>` steps forward again, and closing the sidebar at any depth
+returns the window to your file.
 
 The annotations are a snapshot, so the sidebar closes as soon as they could go
 stale: on either window closing, or on the file being edited, reloaded, replaced
@@ -343,6 +357,20 @@ buffer -- and recover the other three sides from that file's index stages, so
 they work on any conflicted file in the repo. The single-file form completes
 paths, so `:GitTool merge <Tab>` works.
 
+When the current buffer isn't a conflicted file, the no-argument form offers
+the repository's conflicted files instead, through `vim.ui.select` (so a picker
+plugin that replaces it is used), each with the number of conflicts it has
+left:
+
+```
+f.txt  resolved, not staged
+g.txt  2 conflicts
+```
+
+A file you have resolved and saved is still conflicted to git until it is
+staged, so it stays in the list, marked as resolved. With only one conflicted
+file, it opens straight away.
+
 The four-argument form is git's mergetool calling convention. To use it as your
 mergetool:
 
@@ -382,6 +410,10 @@ All conflict maps share an `x` prefix, matching the `]x` / `[x` motions:
 | `xa` | accept the b**a**se (common ancestor) |
 | `]x` / `[x` | jump to the next / previous conflict |
 | `xd` | toggle the `$LOCAL` \| `$MERGED` \| `$REMOTE` three-way **d**iff |
+
+Each conflict's first marker line shows its position, `[2/5]`, and `]x` / `[x`
+echo it as they move. Resolving one echoes how many are left, and the edit
+that clears the last one -- a map or a hand edit -- says so, as the cue to `:w`.
 
 These are buffer-local to `$MERGED`, and act on the conflict the cursor is
 *inside*: outside a region they do nothing rather than reach for the next one
