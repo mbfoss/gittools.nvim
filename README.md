@@ -440,11 +440,3 @@ All link to defaults and can be overridden by a colorscheme.
 ## License <!-- tag: license -->
 
 [MIT](LICENSE).
-
-<!-- panvimdoc-ignore-start -->
-
-## Development <!-- tag: development -->
-
-Internals, tests and conventions: [DEVELOPMENT.md](DEVELOPMENT.md).
-
-<!-- panvimdoc-ignore-end -->
