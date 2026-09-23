@@ -1,4 +1,4 @@
-local M = {}
+local M         = {}
 
 --- LSP-style hover built on `open_floating_preview`:
 --- opens at the cursor without focus, closes when the cursor moves, and the
@@ -46,7 +46,7 @@ local function _fit(win, lines, max_width, max_height, title, cap, bordered)
 
     -- Screen cell of the cursor, 1-based; accounts for winbar, folds and wraps.
     local pos = vim.fn.screenpos(0, vim.fn.line("."), vim.fn.col("."))
-    local above = pos.row - 1 - 2                                  -- 2 for the border
+    local above = pos.row - 1 - 2 -- 2 for the border
     local below = vim.o.lines - vim.o.cmdheight - pos.row - 2
     local up = above > below
     -- Open leftwards if the bordered hover would run off the right edge.
@@ -89,10 +89,10 @@ function M.show(text, opts)
     local max_height = math.floor(vim.o.lines * 0.8)
 
     -- No room for a border: open without it (and the title); `_fit` restores both.
-    local room = _has_room()
+    local room       = _has_room()
     -- The width `open_floating_preview` holds the hover to.
-    local cap = math.min(vim.api.nvim_win_get_width(0) - (room and 2 or 0), max_width)
-    local buf, win = vim.lsp.util.open_floating_preview(lines, opts.syntax or "", {
+    local cap        = math.min(vim.api.nvim_win_get_width(0) - (room and 2 or 0), max_width)
+    local buf, win   = vim.lsp.util.open_floating_preview(lines, opts.syntax or "", {
         border     = room and _BORDER or "none",
         title      = room and opts.title or nil,
         focus_id   = opts.focus_id or _FOCUS_ID,
@@ -100,6 +100,11 @@ function M.show(text, opts)
         max_width  = max_width,
         max_height = max_height,
     })
+
+    if opts.syntax == "markdown" then
+        vim.wo[win].conceallevel = 3
+        vim.wo[win].concealcursor = "nv"
+    end
 
     -- A repeat call focuses the open hover, already sized.
     -- Measure the buffer: the preview trims leading blanks and rewrites markdown.
