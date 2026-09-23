@@ -110,7 +110,7 @@ Submodules:
 
 ## `GitTool diffthis` <!-- tag: diffthis -->
 
-Diffs the current buffer — unsaved edits included — against its git version
+Diffs the current buffer, unsaved edits included, against its git version
 in a side split, in native diff mode. No argument compares against the index.
 
 ```vim
@@ -218,7 +218,7 @@ directory.
 
 ## `GitTool logthis` <!-- tag: logthis -->
 
-`GitTool log` scoped to the current buffer's file — what `diffthis` is to
+`GitTool log` scoped to the current buffer's file, what `diffthis` is to
 `diff`:
 
 ```vim
@@ -236,8 +236,8 @@ directory.
 
 ## `GitTool graph` <!-- tag: graph -->
 
-`GitTool log`'s view — same arguments, options and keys — with the commit
-tree drawn in front of each commit and ref names after the author, in
+`GitTool log`'s view, with the same arguments, options and keys, plus the
+commit tree drawn in front of each commit and ref names after the author, in
 box-drawing glyphs, each rail coloured by its column.
 
 ```vim
@@ -290,7 +290,7 @@ the cursor echoes the commit's summary.
   returns the window to your file.
 
 The annotations are a snapshot: the sidebar closes as soon as they could go
-stale — either window closing, or the file being edited, reloaded, replaced or
+stale: either window closing, or the file being edited, reloaded, replaced or
 deleted.
 
 ## `GitTool diffpaths` <!-- tag: diffpaths -->
@@ -396,17 +396,17 @@ All conflict maps share an `x` prefix, matching the `]x` / `[x` motions:
 
 - Each conflict's first marker line shows its position, `[2/5]`; `]x` / `[x`
   echo it as they move.
-- Resolving echoes how many are left; clearing the last one — by map or by
-  hand — says so, as the cue to `:w`.
+- Resolving echoes how many are left; clearing the last one, by map or by hand,
+  says so, as the cue to `:w`.
 - Buffer-local to `$MERGED`, and act on the conflict the cursor is *inside*:
   outside a region they do nothing rather than reach for the next one down,
   since they rewrite whole blocks.
 - Outside a conflict `x` is the plain builtin delete-character, with no
   `'timeoutlen'` wait; only inside a conflict is it a prefix, and there a lone
   `x` still deletes once the timeout lapses. So outside a conflict `xc` reads
-  as vim reads it — a delete plus a pending change operator.
+  as vim reads it: a delete plus a pending change operator.
 - Accepting only edits the buffer; `:w` saves. Nothing here stages or checks
-  out — `git mergetool` stages `$MERGED` itself on exit.
+  out; `git mergetool` stages `$MERGED` itself on exit.
 
 ### Base text <!-- tag: base-text -->
 

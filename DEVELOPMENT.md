@@ -197,7 +197,7 @@ Three entry points, one implementation:
 
 - the four-file mergetool convention;
 - a single file, the other three sides recovered from its index stages;
-- the current buffer, or — when that isn't conflicted — one picked from
+- the current buffer, or, when that isn't conflicted, one picked from
   `git diff --diff-filter=U` through `vim.ui.select`.
 
 The view is `$MERGED` itself: a normal, editable, saveable buffer with conflict
@@ -214,7 +214,7 @@ regions painted as Current / Base / Incoming bands.
 - Under `conflictStyle = zdiff3` git writes it into the markers and it is read
   straight from the buffer.
 - Otherwise it is recovered by re-merging the three inputs with
-  `git merge-file --diff3`, matching conflicts *by position* — a
+  `git merge-file --diff3`, matching conflicts *by position*, a
   correspondence holding only while the buffer's conflicts still line up with a
   fresh merge, so once regions are hand-edited or resolved `xa` declines rather
   than paste text from the wrong region.
@@ -256,8 +256,8 @@ Generator: [panvimdoc](https://github.com/kdheepak/panvimdoc), pinned in
 
 `doc/tags` is committed, as |package-create| recommends: nothing in the native
 package path generates it, so shipping it is what makes `:help gittools` work
-for someone dropping the repo into `pack/*/opt`. Plugin managers — `vim.pack`
-included — delete and regenerate it on install and update.
+for someone dropping the repo into `pack/*/opt`. Plugin managers (`vim.pack`
+included) delete and regenerate it on install and update.
 
 Tags come from the README headings, so `## \`GitTool diff\`` would give
 `*gittools-gittool-diff*`. panvimdoc has no override (`--doc-mapping` tags only
@@ -268,8 +268,8 @@ comment naming its tag, project name prefixed automatically.
 ## `GitTool diff` <!-- tag: diff -->
 ```
 
-- The comment is invisible on GitHub, so the README keeps full section names --
-  the help file's sections are still titled `GitTool diff` — while the tag
+- The comment is invisible on GitHub, so the README keeps full section names,
+  and the help file's sections are still titled `GitTool diff`, while the tag
   shrinks to `*gittools-diff*`.
 - A heading without one keeps panvimdoc's derived tag, but every README section
   declares one, so renaming a section never silently renames its help tag.
@@ -286,7 +286,7 @@ comment naming its tag, project name prefixed automatically.
 panvimdoc options:
 
 - `--shift-heading-level-by -1` so the README's `#` title drops out and `##`
-  headings become top-level sections — without it every tag carries the title
+  headings become top-level sections; without it every tag carries the title
   (`gittools-gittools.nvim-requirements`).
 - `--dedup-subheadings false` to keep `###` tags short (`gittools-maps`).
 - `--toc true`, `--treesitter true`.
@@ -313,12 +313,12 @@ Known rough edges, all panvimdoc's rendering rather than the README's markup:
   diff pane or spell-checks a list of hashes.
 - No view maps `q`: it stays the user's (macro recording), and views close the
   way any window does.
-- The plugin's views — log, diff file list, blame sidebar, `diffthis` git side
-  — answer `g?` with a hover listing their keys (`keyhelp.map`), each view
+- The plugin's views (log, diff file list, blame sidebar, `diffthis` git side)
+  answer `g?` with a hover listing their keys (`keyhelp.map`), each view
   naming its own: other plugins map into these buffers too (a key-hint plugin's
   triggers), so reading every map off the buffer would list theirs as well. In
   a window too short for a hover (the diff file list) the list opens in a float
-  over the window, read off the buffer's own maps when pressed — so every map
+  over the window, read off the buffer's own maps when pressed, so every map
   there needs a `desc`, which is its help text. `$MERGED` gets none: `g?` is
   rot13 on a real file, and the band hints already name its keys.
 - Generated buffers are `buftype=nofile` scratch buffers via
