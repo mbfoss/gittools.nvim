@@ -228,6 +228,19 @@ local function _collect_changes(root, left, right, paths, cwd)
     return changes
 end
 
+--- The label for one side of a comparison, as shown in the list window's
+--- winbar: a revision, named with the branch/tag/hash it resolves to; the
+--- index; or the working tree.
+---@param root string repo root (for resolving a revision)
+---@param side GitTools.Side
+---@return string
+local function _side_text(root, side)
+    if side.rev then return git.describe_rev(root, side.rev) end
+    if side.index then return "Index" end
+    if side.worktree then return "Working tree" end
+    return "?"
+end
+
 --- Hand `changes` to the diff-session engine as items comparing `left` against
 --- `right` in `root`.
 ---@param root    string repo root
@@ -250,7 +263,10 @@ local function _open_changes(root, left, right, changes)
             right_sha = change.right_sha,
         }
     end
-    session.open(items)
+    session.open(items, { title = {
+        left  = _side_text(root, left),
+        right = _side_text(root, right),
+    } })
 end
 
 --- The set of paths (relative to the repo root) that differ between `left`

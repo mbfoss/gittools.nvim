@@ -185,6 +185,38 @@ function M.show(root, rev)
     })
 end
 
+--- A one-line description of `rev` for a UI label: the revision as typed,
+--- plus the branch/tag names and abbreviated commit it resolves to -- e.g.
+--- `main (a1b2c3d)`, `HEAD~3 (a1b2c3d)`, or `v1.0, main (a1b2c3d)`. A revision
+--- already spelled as a raw object id is named by the refs pointing at it
+--- instead, so a sha typed by hand still says what it is. The typed string is
+--- echoed back unchanged when nothing resolves (a label must always render).
+---@param root string
+---@param rev  string
+---@return string
+function M.describe_rev(root, rev)
+    local hash = M.run(root, { "rev-parse", "--short", "--verify", "--quiet", rev })
+    local refs = M.lines((M.run(root, {
+        "for-each-ref", "--points-at", rev,
+        "--format=%(refname:short)", "refs/heads", "refs/tags",
+    })))
+    local named = table.concat(refs, ", ")
+
+    local text
+    if rev:match("^%x+$") then
+        -- A bare object id says nothing on its own: prefer the refs at it, and
+        -- the short hash when there are none (which also trims a full 40-char
+        -- id down to something readable).
+        text = named ~= "" and named or (hash or rev)
+    else
+        text = rev
+    end
+    if hash and text ~= hash then
+        text = text .. " (" .. hash .. ")"
+    end
+    return text
+end
+
 --- Local branch and tag names (plus `HEAD`) offered as revision completions.
 --- Best-effort: empty outside a repository.
 ---@return string[]

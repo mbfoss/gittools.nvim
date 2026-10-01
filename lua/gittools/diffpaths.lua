@@ -199,8 +199,19 @@ function M.diffpaths(a, b)
     end
 
     -- Two files are a single comparison: skip the file list, which would only
-    -- be a one-line split taking up room below the diff.
-    session.open(items, { list = a_dir })
+    -- be a one-line split taking up room below the diff. Two directories get a
+    -- list, and with it a winbar naming the two trees.
+    --
+    -- Not under `git difftool -d`: it hands the tool two temp trees whose names
+    -- say nothing about the comparison, and exports no variable naming the
+    -- revisions, so there is nothing honest to put there. Such a list gets no
+    -- winbar at all rather than one made of temp paths.
+    local title
+    if a_dir and not vim.env.GIT_DIFFTOOL_DIRDIFF then
+        title = { left = vim.fn.fnamemodify(a_abs, ":~:."), right = vim.fn.fnamemodify(b_abs, ":~:.") }
+    end
+
+    session.open(items, { list = a_dir, title = title })
 end
 
 return M

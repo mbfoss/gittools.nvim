@@ -75,6 +75,8 @@ local keyhelp    = require("gittools.util.keyhelp")
 ---@field list_win   integer?  bottom split window showing the list buffer
 ---@field entries    GitTools.DiffEntry[]  one per list-buffer line (1-based)
 ---@field buffers    integer[] generated virtual buffers to delete on close
+---@field title      { left: string, right: string }?  labels for the two sides
+---                            of the comparison, shown in the list winbar
 ---@field closing    boolean   reentrancy guard for close()
 ---@field setting_up boolean   reentrancy guard to stop infinite event loops
 ---@field shown_line integer?  list line whose diff is currently built, so a
@@ -120,6 +122,16 @@ local _RENAME_ARROW_PAT = vim.fn.escape(_RENAME_ARROW, [[/\.*$^~[]])
 
 vim.api.nvim_set_hl(0, "GitToolsRenameArrow", { link = "GitToolsStatusRenamed", default = true })
 vim.api.nvim_set_hl(0, "GitToolsRenameOldPath", { link = "Comment", default = true })
+
+--- The list window's winbar for a comparison between two labelled sides.
+--- `%` is doubled because the winbar is a statusline-style string, where a
+--- single `%` would start a click/format directive -- and a branch or path may
+--- well contain one.
+---@param title { left: string, right: string }
+---@return string
+local function _winbar(title)
+    return ((" %s %s %s "):format(title.left, _RENAME_ARROW, title.right):gsub("%%", "%%%%"))
+end
 
 ---@param path string
 ---@return string[]
@@ -638,6 +650,13 @@ local function _open_list(session)
     vim.wo[win].relativenumber = false
     vim.wo[win].cursorline     = true
     vim.wo[win].winfixheight   = true
+    -- Name what the list is a list *of*, in the winbar above it: the two sides
+    -- of the comparison (revisions with their branch/tag/hash, the index, the
+    -- working tree, or the two paths), so the picker is self-describing after
+    -- the command line has scrolled away.
+    if session.title then
+        vim.wo[win].winbar = _winbar(session.title)
+    end
     session.list_win           = win
 
     -- Closing the list on its own also collapses the session, so the user only
@@ -695,6 +714,9 @@ end
 ---                     true). Pass false for a comparison that is inherently a
 ---                     single file -- `:GitTool diffpaths a b` on two files --
 ---                     where a one-line picker is only a split in the way.
+---@field title { left: string, right: string }? labels for the two sides of the
+---                     comparison, shown in the list window's winbar (only used
+---                     when the list is).
 
 --- Open a diff session over `items`: build the side-by-side layout, the driving
 --- file list, and show the first item up front (so the layout opens on a real
@@ -706,6 +728,7 @@ end
 ---@param opts GitTools.DiffOpts?
 function M.open(items, opts)
     local show_list = not (opts and opts.list == false)
+    local title     = show_list and opts and opts.title or nil
     ---@type GitTools.DiffEntry[]
     local entries = {}
     for _, item in ipairs(items) do
@@ -736,6 +759,7 @@ function M.open(items, opts)
         list_buf   = nil,
         list_win   = nil,
         entries    = entries,
+        title      = title,
         buffers    = {},
         closing    = false,
         setting_up = false,

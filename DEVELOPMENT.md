@@ -57,6 +57,12 @@ content*, not the content:
   nothing about where items came from.
 - New sources of "a list of changed files" belong as another front end, not
   another layout.
+- `opts.title` is the one thing the front end still words: the two labels for
+  the list window's winbar, composed left `→` right by the engine (which owns
+  the arrow and escapes `%`, the winbar being a statusline string). Only the
+  front end can name its sides -- a revision's branch/tag/hash for `diff`, the
+  two trees for a `diffpaths` directory -- so the engine takes the finished
+  words rather than deducing them from the items.
 
 ### Sessions and tabs
 
@@ -85,6 +91,15 @@ content*, not the content:
 - Outside a session they are a no-op, which makes claiming them globally cheap.
 - `f` rather than `c` so the builtin `]c` / `[c` (next/previous hunk) keeps
   working.
+
+### `git difftool -d` (`diffpaths.lua`)
+
+- Dir-diff mode hands the tool two `mkdtemp` trees
+  (`git-difftool.XXXXXX/left`, `/right`) whose names carry nothing about the
+  comparison, and git exports no variable naming the revisions -- only
+  `GIT_DIFFTOOL_DIRDIFF`. There is nothing honest to label the list with, so
+  under that variable it gets no winbar at all, rather than one made of temp
+  paths.
 
 ## `util/git.lua`
 

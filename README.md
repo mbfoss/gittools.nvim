@@ -88,7 +88,9 @@ Included in the file list:
 - Unwritten buffer edits, diffed from the buffer.
 - Pathspecs filter both.
 
-Layout: file list in a bottom split driving a side-by-side diff.
+Layout: file list in a bottom split driving a side-by-side diff. The list's
+winbar names the two sides being compared -- each revision with the
+branch/tag/hash it resolves to, plus the index or working tree.
 
 | key | action |
 | --- | --- |
@@ -318,7 +320,8 @@ The two-argument form is git's difftool calling convention:
 ```
 
 - `git difftool` opens each changed file in the layout.
-- `git difftool -d` opens the whole change set at once.
+- `git difftool -d` opens the whole change set at once; its file list has no
+  winbar, the temp trees it diffs naming nothing.
 - Submodules are listed as rows and `o` opens their own diff, as in
   `GitTool diff`.
 
