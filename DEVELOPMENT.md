@@ -28,8 +28,8 @@ Loading:
 - `init.lua` owns argument parsing and completion only; every feature has its
   own module, and it has no load-time side effects.
 - `plugin/gittools.lua` is the only module read at startup. It registers
-  `:GitTool` through `util/usercmd` (argument splitter + completion dispatcher,
-  which knows nothing about the subcommands).
+  `:GitTool` through `util/usercmd` (completion dispatcher, which knows nothing
+  about the subcommands); the run callback takes its arguments from `opts.fargs`.
 - Its run / completion callbacks `require("gittools")` at call time, so
   `init.lua` and the feature modules load on the first `:GitTool` (or first
   `<Tab>`).

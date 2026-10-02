@@ -129,8 +129,7 @@ end
 
 --- `:GitTool`'s implementation, as a `gittools.usercmd.run_fn`. Exposed so that
 --- `plugin/gittools.lua` can register the command without this module being
---- loaded: it hands `util/usercmd` a wrapper that requires us on the first
---- invocation.
+--- loaded: the command callback requires us on the first invocation.
 ---@type gittools.usercmd.run_fn
 function M.run(_, args)
     local sub = args[1]
