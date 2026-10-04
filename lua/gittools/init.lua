@@ -11,6 +11,15 @@ local logtool  = require("gittools.log")
 local blame    = require("gittools.blame")
 local merge    = require("gittools.merge")
 
+-- Required lazily, on first completion: `M.complete` is the only user, and the
+-- cache keeps the `require` lookup off every keystroke.
+local usercmd ---@type table?
+---@return table
+local function _usercmd()
+    usercmd = usercmd or require("gittools.util.usercmd")
+    return usercmd
+end
+
 --- `:GitTool` -- a git-backed front end for Neovim's native diff facilities.
 ---   GitTool diff [--staged] [<rev> [<rev>]]   directory diff via the built-in
 ---                [-- <path>...]                difftool (file list + layout),
@@ -222,7 +231,7 @@ function M.complete(_, rest, arg_lead)
 
     local sub = rest[1]
     if sub == "diffpaths" then
-        return vim.fn.getcompletion(arg_lead, "file")
+        return _usercmd().complete_filename(arg_lead, "file")
     elseif sub == "diff" then
         local out = {}
         local has_flag, has_sep = false, false
@@ -231,7 +240,7 @@ function M.complete(_, rest, arg_lead)
             if a == "--" then has_sep = true end
         end
         if has_sep then
-            return vim.fn.getcompletion(arg_lead, "file")
+            return _usercmd().complete_filename(arg_lead, "file")
         end
         if not has_flag then
             out[#out + 1] = "--staged"
@@ -241,7 +250,7 @@ function M.complete(_, rest, arg_lead)
         vim.list_extend(out, git.refs())
         -- Pathspecs can be given without a `--` here too (`gittools.diff`
         -- tells them from the revisions), so files belong alongside the refs.
-        vim.list_extend(out, vim.fn.getcompletion(arg_lead, "file"))
+        vim.list_extend(out, _usercmd().complete_filename(arg_lead, "file"))
         return out
     elseif sub == "diffthis" then
         return git.refs()
@@ -255,14 +264,14 @@ function M.complete(_, rest, arg_lead)
         vim.list_extend(out, git.refs())
         return out
     elseif sub == "merge" then
-        return vim.fn.getcompletion(arg_lead, "file")
+        return _usercmd().complete_filename(arg_lead, "file")
     elseif sub == "log" or sub == "graph" then
         local has_sep = false
         for _, a in ipairs(rest) do
             if a == "--" then has_sep = true end
         end
         if has_sep then
-            return vim.fn.getcompletion(arg_lead, "file")
+            return _usercmd().complete_filename(arg_lead, "file")
         end
         local out = { "--" }
         vim.list_extend(out, _LOG_OPTS)
@@ -271,7 +280,7 @@ function M.complete(_, rest, arg_lead)
         -- The path can be given without a `--` (`gittools.log` tells the two
         -- apart), so files belong here alongside the refs rather than only
         -- after a separator.
-        vim.list_extend(out, vim.fn.getcompletion(arg_lead, "file"))
+        vim.list_extend(out, _usercmd().complete_filename(arg_lead, "file"))
         return out
     end
     return {}
