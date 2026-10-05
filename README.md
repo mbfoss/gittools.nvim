@@ -1,5 +1,10 @@
 # gittools.nvim
 
+> [!NOTE]
+> **Work in progress.** Stable and usable as it stands, but still evolving:
+> changes, including breaking ones, can land at any time. Pin a commit if you
+> need a fixed target.
+
 A git-backed front end for Neovim's native diff facilities, under a single
 `:GitTool` command.
 
