@@ -16,15 +16,18 @@ local keyhelp  = require("gittools.util.keyhelp")
 --- that leaves one line per commit (`--all`, `--no-merges`, `-n 50`, ...),
 --- handed to git as given. `:GitTool logthis [<opt>...] [<rev>]` -- the same
 --- flat list, scoped to the current buffer's file without naming it.
---- `:GitTool stash_log` -- the stash list (`git stash list`) in the same kind
---- of view, each entry labeled with its `stash@{N}`
---- selector instead of a hash. In all four views `<CR>` diffs the commit under
+--- `:GitTool stashlist` -- the stash list (`git stash list`) in the same kind
+--- of view, each entry labeled with its `stash@{N}` selector instead of a hash.
+--- `:GitTool reflog [<ref>] [<opt>...]` -- the same, over `git reflog`, each
+--- entry labeled with its `HEAD@{N}` selector and dated by the entry, not by
+--- the commit it points at. In all five views `<CR>` diffs the commit under
 --- the cursor against the marked comparison base, or -- with nothing marked --
---- against its first parent (via `gittools.diff`); `c` marks the commit under
---- the cursor as that base, one at a time, shown in the list with a `»`; `K`
---- shows the commit's details -- header, message and diffstat -- in a float. The
---- diff opens in its own tab and the list stays put behind it, so closing the
---- diff comes back to the same place in the history.
+--- against its first parent (via `gittools.diff`), except in the reflog, where
+--- it is the entry below, the state before that event; `c` marks the commit
+--- under the cursor as that base, one at a time, shown in the list with a `»`;
+--- `K` shows the commit's details -- header, message and diffstat -- in a
+--- float. The diff opens in its own tab and the list stays put behind it, so
+--- closing the diff comes back to the same place in the history.
 
 local _LIMIT      = 500
 local _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -46,19 +49,23 @@ end
 ---@field author  string?   author name
 ---@field subject string?
 ---@field refs    string?   ref decoration, e.g. "HEAD -> main, origin/main"
----@field ref     string?   display selector shown instead of the short hash,
----                          e.g. "stash@{0}"; unset outside the stash view
+---@field ref     string?   selector a user would type for this entry, e.g.
+---                          "stash@{0}", shown instead of the short hash and
+---                          the entry's identity, in the stash and reflog views
 
 ---@class GitTools.LogSession
 ---@field root    string
 ---@field label   string   what the view is showing, as a buffer name suffix
----                        (`log/HEAD`, `graph/v1.2.0:lua`, `stashlist`)
+---                        (`log/HEAD`, `graph/v1.2.0:lua`, `stashlist`,
+---                        `reflog/HEAD`)
 ---@field buf     integer?
 ---@field win     integer?
----@field marked  string?  hash of the commit marked as the comparison base, the
+---@field marked  string?  key of the entry marked as the comparison base, the
 ---                        left side `<CR>` diffs against; only ever one
+---@field prev_diff boolean?  unmarked `<CR>` diffs an entry against the one
+---                        below it rather than against its parent (the reflog)
 ---@field entries GitTools.LogEntry[]           by buffer line
----@field line_of table<string, integer>        hash -> buffer line
+---@field line_of table<string, integer>        entry key -> buffer line
 ---@type GitTools.LogSession?
 local _session = nil
 
@@ -79,7 +86,8 @@ local function _split_parents(parents)
     return out
 end
 
---- Parse `git log --pretty=format:%H\t%P\t%ad\t%an\t%s` output.
+--- Parse five tab-separated fields -- hash, parents, date, author, subject --
+--- off `git log` / `stash list` / `reflog` output with a matching `--pretty`.
 ---@param out string
 ---@return GitTools.LogEntry[]
 local function _parse_log(out)
@@ -333,6 +341,15 @@ local function _id(e)
     return e.ref or e.hash:sub(1, 7)
 end
 
+--- Identity within a view: the selector a user would type (`stash@{0}`,
+--- `HEAD@{1}`) where the view has one, the commit hash otherwise. A reflog can
+--- list one commit twice, so the hash alone is not unique there.
+---@param e GitTools.LogEntry
+---@return string
+local function _key(e)
+    return (e.ref or e.hash) --[[@as string]]
+end
+
 --- The `{text, hl}` chunks for a commit's fields: id, date, author, subject.
 ---@param e GitTools.LogEntry
 ---@return [string, string][]
@@ -366,7 +383,7 @@ local function _entry_chunks(session, entry)
         chunks[#chunks + 1] = chunk
     end
     if entry.hash then
-        local marked = session.marked == entry.hash
+        local marked = session.marked == _key(entry)
         chunks[#chunks + 1] = { marked and _MARK or "  ", marked and "GitToolsLogMark" or "Normal" }
         for _, chunk in ipairs(_build_entry(entry)) do
             chunks[#chunks + 1] = chunk
@@ -412,28 +429,42 @@ local function _render(session, lnum)
     end
 end
 
---- The commit under the cursor, or nil on a rail-only line.
+--- The commit under the cursor and its buffer line, or nothing on a rail-only
+--- line.
 ---@param session GitTools.LogSession
 ---@return GitTools.LogEntry?
+---@return integer?
 local function _entry_at_cursor(session)
     local lnum = vim.api.nvim_win_get_cursor(0)[1]
     local entry = session.entries[lnum]
-    return (entry and entry.hash) and entry or nil
+    if entry and entry.hash then return entry, lnum end
 end
 
---- Diff `entry` against the marked comparison base, or -- with nothing marked,
---- or with the mark sitting on `entry` itself, where the comparison would be
---- empty -- against its first parent (the empty tree, for a root commit), i.e.
---- what that commit alone changed. The log stays open: the diff takes a tab of
---- its own, so closing it drops the user straight back here to pick the next
---- commit.
+--- Diff `entry` against the marked base, or -- with nothing marked, or the mark
+--- on `entry` itself, where that comparison would be empty -- against its first
+--- parent (the empty tree for a root commit): what that commit alone changed.
 ---@param session GitTools.LogSession
 ---@param entry   GitTools.LogEntry
-local function _diff_entry(session, entry)
+---@param lnum    integer  `entry`'s buffer line
+local function _diff_entry(session, entry, lnum)
     local root = session.root
-    if session.marked and session.marked ~= entry.hash then
-        difftool.diff({ revs = { session.marked, entry.hash }, root = root })
+    local at = session.marked and session.line_of[session.marked]
+    local marked = at and session.entries[at]
+    if marked and marked ~= entry then
+        difftool.diff({ revs = { marked.hash, entry.hash }, root = root })
         return
+    end
+    -- A reflog's neighbours are states, not ancestors: what an entry changed is
+    -- the difference from the one below it. Entries repeating a hash (a
+    -- checkout) changed nothing, so they are stepped over.
+    if session.prev_diff then
+        for i = lnum + 1, #session.entries do
+            local prev = session.entries[i]
+            if prev.hash and prev.hash ~= entry.hash then
+                difftool.diff({ revs = { prev.hash, entry.hash }, root = root })
+                return
+            end
+        end
     end
     local parent = entry.parents[1]
     if parent and git.verify_rev(root, parent) then
@@ -497,11 +528,14 @@ local function _show(session)
     session.win = win
     _session = session
 
+    local cr_desc = session.prev_diff
+        and "Diff entry against the marked base, or the entry below"
+        or "Diff commit against the marked base, or its parent"
     vim.keymap.set("n", "<CR>", function()
-        local entry = _entry_at_cursor(session)
-        if not entry then return end
-        _diff_entry(session, entry)
-    end, { buffer = buf, desc = "Diff commit against the marked base, or its parent" })
+        local entry, lnum = _entry_at_cursor(session)
+        if not (entry and lnum) then return end
+        _diff_entry(session, entry, lnum)
+    end, { buffer = buf, desc = cr_desc })
 
     -- `c` marks the commit under the cursor as the comparison base, which is
     -- what `<CR>` then diffs every other commit against. Only one mark exists at
@@ -511,7 +545,8 @@ local function _show(session)
         local entry = _entry_at_cursor(session)
         if not entry then return end
         local old = session.marked
-        session.marked = old ~= entry.hash and entry.hash or nil
+        local key = _key(entry)
+        session.marked = old ~= key and key or nil
         if old then _render(session, session.line_of[old]) end
         if session.marked then _render(session, session.line_of[session.marked]) end
     end, { buffer = buf, desc = "Mark commit as the comparison base (toggle)" })
@@ -599,6 +634,7 @@ end
 
 ---@class GitTools.LogOpts
 ---@field rev  string?    start the log from this revision instead of HEAD
+---@field ref  string?    reflog only: whose reflog to list, default HEAD
 ---@field path string?    scope the log to commits touching this path
 ---@field args string[]?  extra `git log` options, passed through verbatim
 ---                       (e.g. `--all`, `--no-merges`, `--author=...`)
@@ -684,7 +720,7 @@ local function _run_log(name, opts, extra_args, parse, reverse)
 
     local line_of = {}
     for i, entry in ipairs(entries) do
-        if entry.hash then line_of[entry.hash] = i end
+        if entry.hash then line_of[_key(entry)] = i end
     end
 
     _show({
@@ -754,7 +790,7 @@ local function _run_stash_log()
     local line_of = {}
     for i, entry in ipairs(entries) do
         entry.ref = string.format("stash@{%d}", i - 1)
-        line_of[entry.hash] = i
+        line_of[_key(entry)] = i
     end
 
     _show({ root = root, label = "stashlist", marked = nil, entries = entries, line_of = line_of })
@@ -799,6 +835,99 @@ end
 --- files in a second parent that this diff doesn't show.
 function M.stash_log()
     _run_stash_log()
+end
+
+--- Filters the reflog view can carry: those dropping entries from the *end*, so
+--- the `HEAD@{N}` selectors derived from list position stay git's own. `--until`
+--- trims the newest entries and would falsify them, as would `--skip`/`--all`.
+local _REFLOG_OPTS = {
+    ["-n"] = true, ["--max-count"] = true, ["--since"] = true,
+}
+
+--- The first option in `args` the reflog view can't carry, or nil if all of them
+--- are fine. The glued short form (`-n20`) needs its own pattern: `_split_opts`
+--- in `gittools` pairs up `-n 20` but deliberately leaves that one alone.
+---@param args string[]
+---@return string?
+local function _reflog_rejected(args)
+    for _, a in ipairs(args) do
+        local flag = a:match("^([^=]+)=") or a
+        if vim.startswith(flag, "-")
+            and not _REFLOG_OPTS[flag] and not flag:match("^%-n%d+$") then
+            return a
+        end
+    end
+    return nil
+end
+
+--- Run `git reflog <ref>` and show the parsed entries -- the `_run_stash_log`
+--- shape, except that the selector (`HEAD@{N}`) is the entry's identity rather
+--- than a label: a reflog can list one commit more than once.
+---@param opts GitTools.LogOpts
+local function _run_reflog(opts)
+    local root = git.root()
+    if not root then
+        _notify("Not inside a git repository", vim.log.levels.WARN)
+        return
+    end
+
+    -- Checked before the ref is used, so an unsupported option taking a value
+    -- (`--author Ada`) is named as the option, not as a bad revision.
+    local bad = _reflog_rejected(opts.args or {})
+    if bad then
+        _notify("Option not supported here: " .. bad, vim.log.levels.ERROR)
+        return
+    end
+
+    local ref = opts.ref or "HEAD"
+    -- The user's options come last, so a `-n` of their own overrides the cap.
+    local args = {
+        "reflog", ref,
+        "--date=format:%Y-%m-%d %H:%M",
+        "-n", tostring(_LIMIT),
+        "--pretty=format:%H\t%P\t%gd\t%an\t%gs",
+    }
+    vim.list_extend(args, opts.args or {})
+
+    local out, err = git.run(root, args)
+    if not out then
+        _notify(err ~= "" and err or "git reflog failed", vim.log.levels.ERROR)
+        return
+    end
+
+    local entries = _parse_log(out)
+    if #entries == 0 then
+        _notify("No reflog entries found")
+        return
+    end
+
+    local line_of = {}
+    for i, entry in ipairs(entries) do
+        -- `%gd` holds the selector in the date format asked for above, e.g.
+        -- "HEAD@{2026-10-11 18:52}": git's own ref name, and the entry's own
+        -- time, unlike `%ad`/`%cd`. The index is the list position.
+        local name, time = entry.date:match("^(.-)@{(.*)}$")
+        entry.ref = string.format("%s@{%d}", name or ref, i - 1)
+        entry.date = time or entry.date
+        line_of[_key(entry)] = i
+    end
+
+    _show({
+        root = root,
+        label = "reflog/" .. ref,
+        marked = nil,
+        prev_diff = true,
+        entries = entries,
+        line_of = line_of,
+    })
+end
+
+--- List a ref's reflog (`git reflog <ref>`, HEAD by default) in an interactive
+--- tab of its own, same interaction as `M.log`, except that with nothing marked
+--- `<CR>` compares an entry against the one below: the state before that event.
+---@param opts GitTools.LogOpts?  `ref` and `args` only
+function M.reflog(opts)
+    _run_reflog(opts or {})
 end
 
 return M

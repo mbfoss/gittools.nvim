@@ -17,6 +17,7 @@ A git-backed front end for Neovim's native diff facilities, under a single
 | `GitTool logthis [<opt>...] [<rev>]` | like `log`, scoped to the current buffer's file |
 | `GitTool graph [<opt>...] [<rev>] [-- <path>]` | like `log`, with the commit tree drawn alongside it |
 | `GitTool stashlist` | browse `git stash list` the same way as `log` |
+| `GitTool reflog [<ref>] [<opt>...]` | browse `git reflog` the same way, `HEAD` by default |
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
 | `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
 <!-- panvimdoc-ignore-start -->
@@ -28,7 +29,7 @@ Demo: `GitTool graph --all` (`K` details, `c` comparison base, `<CR>` diff),
 <!-- panvimdoc-ignore-end -->
 Tab behaviour:
 
-- Own tab: `diff`, `diffpaths`, `log`, `logthis`, `graph`, `stashlist`.
+- Own tab: `diff`, `diffpaths`, `log`, `logthis`, `graph`, `stashlist`, `reflog`.
 - Current tab: `diffthis`, `blame`, `merge`.
 - The current tab is reused only when it holds a single window over an empty,
   unnamed buffer; closing the view then closes the tab.
@@ -202,7 +203,7 @@ The diff opens in its own tab and the history stays open, so closing the diff
 returns to the same commit in the list.
 
 Buffer names say which history a tab holds: `gittools://log/HEAD`,
-`gittools://graph/v1.2.0:src`, `gittools://stashlist`.
+`gittools://graph/v1.2.0:src`, `gittools://stashlist`, `gittools://reflog/HEAD`.
 
 Git aliases, for opening either view from the shell:
 
@@ -271,6 +272,59 @@ box-drawing glyphs, each rail coloured by its column.
 - Path scoping still joins rails across the commits the filter dropped.
 - Rails whose next commit falls past the 500-commit cap run off the bottom.
 - `--reverse` works in `log`; `graph` rejects it, as it does `--graph`.
+
+## `GitTool reflog` <!-- tag: reflog -->
+
+`GitTool log`'s view over `git reflog`, one reflog entry per line, `HEAD` by
+default or a ref you name.
+
+```vim
+:GitTool reflog                       " HEAD's reflog
+:GitTool reflog main                  " a branch's
+:GitTool reflog -n 20                 " the 20 most recent
+:GitTool reflog --since=2.hours.ago
+```
+
+```
+  HEAD@{0} 2026-10-11 18:52 Alice reset: moving to HEAD~1
+» HEAD@{1} 2026-10-11 18:47 Alice commit (amend): tidy the option table
+  HEAD@{2} 2026-10-11 18:31 Bob commit: add the toggle
+```
+
+| key | action |
+| --- | --- |
+| `<CR>` | diff the entry against the comparison base, or the entry below it |
+| `c` | mark / unmark the entry under the cursor as the comparison base |
+| `K` | show the pointed-at commit's details in a float |
+| `g?` | list these keys |
+
+`<CR>` with nothing marked compares the entry against the one *below* it, the
+state before that event:
+
+- That is what a `reset`, `amend` or `rebase` entry changed; its first parent
+  often says nothing about the event at all.
+- Entries repeating a commit -- a `checkout` that moved nothing -- are stepped
+  over; the oldest entry falls back to its own first parent.
+- `c` marks one entry, and `<CR>` then compares against that instead, as in
+  `log`.
+
+What the line shows:
+
+- The selector is the entry's identity, not the hash: one commit can sit on
+  several entries.
+- The date is the entry's own, not the pointed-at commit's, so a `reset` to an
+  old commit is dated when it ran, not when that commit was written.
+- The author is the pointed-at commit's; git names no reflog actor.
+- `<CR>` and `K` act on the commit the entry points at.
+
+Options:
+
+- `-n` / `--max-count`, `--since`.
+- Refused: `--until`, `--skip`, `--grep`, `--author`, `--all`, `--reverse`. Every
+  `HEAD@{N}` shown is derived from list position, so an option that drops entries
+  from the head or the middle would print selectors that lie.
+- `GitTool log --reflog` is a different thing entirely: it lists the commits
+  reflogs mention, deduplicated, with no reflog entries of its own.
 
 ## `GitTool blame` <!-- tag: blame -->
 

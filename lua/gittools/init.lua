@@ -39,6 +39,9 @@ end
 ---                                             e.g. --all, --no-merges, -n 50)
 ---   GitTool stashlist                         browse `git stash list` the
 ---                                             same way as log
+---   GitTool reflog [<ref>]                    browse `git reflog` the same
+---                  [<opt>...]                 way, HEAD by default; <opt> is
+---                                             -n or --since
 ---   GitTool blame                             annotate the current buffer in
 ---                                             a scroll-bound blame sidebar
 ---   GitTool merge [<file> | $LOCAL $BASE      resolve conflicts inline in
@@ -200,6 +203,13 @@ function M.run(_, args)
             return
         end
         logtool.stash_log()
+    elseif sub == "reflog" then
+        local log_opts, revs = _split_opts({ unpack(args, 2) })
+        if #revs > 1 then
+            _notify("GitTool reflog takes at most one ref", vim.log.levels.ERROR)
+            return
+        end
+        logtool.reflog({ ref = revs[1], args = log_opts })
     elseif sub == "blame" then
         if args[2] then
             _notify("GitTool blame takes no arguments", vim.log.levels.ERROR)
@@ -226,7 +236,7 @@ end
 function M.complete(_, rest, arg_lead)
     if #rest == 0 then
         return { "diff", "diffpaths", "diffthis", "log", "logthis", "graph",
-            "stashlist", "blame", "merge" }
+            "stashlist", "reflog", "blame", "merge" }
     end
 
     local sub = rest[1]
@@ -261,6 +271,11 @@ function M.complete(_, rest, arg_lead)
         out[#out + 1] = "--reverse"
         -- `--follow` is on by default here; this turns it off.
         out[#out + 1] = "--no-follow"
+        vim.list_extend(out, git.refs())
+        return out
+    elseif sub == "reflog" then
+        -- No paths and no `--`: the view takes a ref and its own filters only.
+        local out = { "-n", "--max-count=", "--since=" }
         vim.list_extend(out, git.refs())
         return out
     elseif sub == "merge" then

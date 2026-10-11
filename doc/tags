@@ -12,5 +12,6 @@ gittools-log	gittools.txt	/*gittools-log*
 gittools-logthis	gittools.txt	/*gittools-logthis*
 gittools-maps	gittools.txt	/*gittools-maps*
 gittools-merge	gittools.txt	/*gittools-merge*
+gittools-reflog	gittools.txt	/*gittools-reflog*
 gittools-requirements	gittools.txt	/*gittools-requirements*
 gittools-table-of-contents	gittools.txt	/*gittools-table-of-contents*

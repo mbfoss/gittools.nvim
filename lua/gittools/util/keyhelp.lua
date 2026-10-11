@@ -14,7 +14,7 @@ function M.map(buf, keys, extra)
     vim.keymap.set("n", "g?", function()
         local rows = {}
         for _, row in ipairs(extra or {}) do rows[#rows + 1] = row end
-        for _, lhs in ipairs(vim.list_extend(vim.list_slice(keys), { "g?" })) do
+        for _, lhs in ipairs(keys) do
             local map = vim.fn.maparg(lhs, "n", false, true)
             if map.buffer == 1 and map.desc then rows[#rows + 1] = { lhs, map.desc } end
         end

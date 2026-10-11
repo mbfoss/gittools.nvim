@@ -10,13 +10,14 @@ Table of Contents                                 *gittools-table-of-contents*
 5. GitTool log                                                  |gittools-log|
 6. GitTool logthis                                          |gittools-logthis|
 7. GitTool graph                                              |gittools-graph|
-8. GitTool blame                                              |gittools-blame|
-9. GitTool diffpaths                                      |gittools-diffpaths|
-10. GitTool merge                                             |gittools-merge|
+8. GitTool reflog                                            |gittools-reflog|
+9. GitTool blame                                              |gittools-blame|
+10. GitTool diffpaths                                     |gittools-diffpaths|
+11. GitTool merge                                             |gittools-merge|
   - Maps                                                       |gittools-maps|
   - Base text                                             |gittools-base-text|
-11. Highlights                                           |gittools-highlights|
-12. License                                                 |gittools-license|
+12. Highlights                                           |gittools-highlights|
+13. License                                                 |gittools-license|
 
   [!NOTE] **Work in progress.** Stable and usable as it stands, but still
   evolving: changes, including breaking ones, can land at any time. Pin a commit
@@ -48,6 +49,9 @@ A git-backed front end for Neovim’s native diff facilities, under a single
   GitTool stashlist                                        browse git stash list the same way
                                                            as log
 
+  GitTool reflog [<ref>] [<opt>...]                        browse git reflog the same way,
+                                                           HEAD by default
+
   GitTool blame                                            annotate the current buffer in a
                                                            scroll-bound sidebar
 
@@ -55,7 +59,7 @@ A git-backed front end for Neovim’s native diff facilities, under a single
   --------------------------------------------------------------------------------------------
 Tab behaviour:
 
-- Own tab: `diff`, `diffpaths`, `log`, `logthis`, `graph`, `stashlist`.
+- Own tab: `diff`, `diffpaths`, `log`, `logthis`, `graph`, `stashlist`, `reflog`.
 - Current tab: `diffthis`, `blame`, `merge`.
 - The current tab is reused only when it holds a single window over an empty,
     unnamed buffer; closing the view then closes the tab.
@@ -263,7 +267,8 @@ The diff opens in its own tab and the history stays open, so closing the diff
 returns to the same commit in the list.
 
 Buffer names say which history a tab holds: `gittools://log/HEAD`,
-`gittools://graph/v1.2.0:src`, `gittools://stashlist`.
+`gittools://graph/v1.2.0:src`, `gittools://stashlist`,
+`gittools://reflog/HEAD`.
 
 Git aliases, for opening either view from the shell:
 
@@ -339,7 +344,70 @@ box-drawing glyphs, each rail coloured by its column.
 
 
 ==============================================================================
-8. GitTool blame                                              *gittools-blame*
+8. GitTool reflog                                            *gittools-reflog*
+
+`GitTool log`’s view over `git reflog`, one reflog entry per line, `HEAD` by
+default or a ref you name.
+
+>vim
+    :GitTool reflog                       " HEAD's reflog
+    :GitTool reflog main                  " a branch's
+    :GitTool reflog -n 20                 " the 20 most recent
+    :GitTool reflog --since=2.hours.ago
+<
+
+>
+      HEAD@{0} 2026-10-11 18:52 Alice reset: moving to HEAD~1
+    » HEAD@{1} 2026-10-11 18:47 Alice commit (amend): tidy the option table
+      HEAD@{2} 2026-10-11 18:31 Bob commit: add the toggle
+<
+
+  -----------------------------------------------------------------------
+  key                                 action
+  ----------------------------------- -----------------------------------
+  <CR>                                diff the entry against the
+                                      comparison base, or the entry below
+                                      it
+
+  c                                   mark / unmark the entry under the
+                                      cursor as the comparison base
+
+  K                                   show the pointed-at commit’s
+                                      details in a float
+
+  g?                                  list these keys
+  -----------------------------------------------------------------------
+`<CR>` with nothing marked compares the entry against the one _below_ it, the
+state before that event:
+
+- That is what a `reset`, `amend` or `rebase` entry changed; its first parent
+    often says nothing about the event at all.
+- Entries repeating a commit – a `checkout` that moved nothing – are stepped
+    over; the oldest entry falls back to its own first parent.
+- `c` marks one entry, and `<CR>` then compares against that instead, as in
+    `log`.
+
+What the line shows:
+
+- The selector is the entry’s identity, not the hash: one commit can sit on
+    several entries.
+- The date is the entry’s own, not the pointed-at commit’s, so a `reset` to an
+    old commit is dated when it ran, not when that commit was written.
+- The author is the pointed-at commit’s; git names no reflog actor.
+- `<CR>` and `K` act on the commit the entry points at.
+
+Options:
+
+- `-n` / `--max-count`, `--since`.
+- Refused: `--until`, `--skip`, `--grep`, `--author`, `--all`, `--reverse`. Every
+    `HEAD@{N}` shown is derived from list position, so an option that drops entries
+    from the head or the middle would print selectors that lie.
+- `GitTool log --reflog` is a different thing entirely: it lists the commits
+    reflogs mention, deduplicated, with no reflog entries of its own.
+
+
+==============================================================================
+9. GitTool blame                                              *gittools-blame*
 
 Per-line commit info in a scroll-bound sidebar. The buffer’s live contents
 are blamed, so unsaved edits stay line-aligned and show as "Not committed".
@@ -368,7 +436,7 @@ deleted.
 
 
 ==============================================================================
-9. GitTool diffpaths                                      *gittools-diffpaths*
+10. GitTool diffpaths                                     *gittools-diffpaths*
 
 Two arbitrary paths off disk, in `GitTool diff`’s layout, with no repository
 involved. Both paths must be the same kind.
@@ -404,7 +472,7 @@ as files.
 
 
 ==============================================================================
-10. GitTool merge                                             *gittools-merge*
+11. GitTool merge                                             *gittools-merge*
 
 `$MERGED` in a normal, editable buffer, each conflict region painted as a
 Current / Base / Incoming band, with buffer-local maps to resolve them.
@@ -515,7 +583,7 @@ BASE TEXT                                                 *gittools-base-text*
 
 
 ==============================================================================
-11. Highlights                                           *gittools-highlights*
+12. Highlights                                           *gittools-highlights*
 
 All link to defaults and can be overridden by a colorscheme.
 
@@ -538,7 +606,7 @@ All link to defaults and can be overridden by a colorscheme.
   -----------------------------------------------------------------------
 
 ==============================================================================
-12. License                                                 *gittools-license*
+13. License                                                 *gittools-license*
 
 MIT <LICENSE>.
 

@@ -11,7 +11,7 @@ lua/gittools/init.lua        :GitTool registration, argument parsing, completion
 lua/gittools/diff.lua        git-backed file list for `diff`
 lua/gittools/diffpaths.lua   path-backed file list for `diffpaths`
 lua/gittools/diffthis.lua    single-buffer diff against a git version
-lua/gittools/log.lua         `log`, `logthis`, `graph`, `stashlist`
+lua/gittools/log.lua         `log`, `logthis`, `graph`, `stashlist`, `reflog`
 lua/gittools/blame.lua       `blame`
 lua/gittools/merge.lua       `merge`
 lua/gittools/util/
@@ -151,6 +151,19 @@ Both run one `git log` with a fixed `--pretty=format:` and parse it.
   parents, and reversed, every commit would open a rail of its own.
 - `_is_plain_rev` decides whether a revision can be validated up front; ranges
   (`a..b`, `a...b`) and exclusions (`^a`) are left for git to report on.
+
+### reflog
+
+- Identity is the selector (`HEAD@{N}`), not the hash: one commit can appear on
+  several entries, so `line_of` and `marked` key on `entry.ref or entry.hash`.
+- The date comes from `%gd` under `--date=format:`. On a reflog entry `%ad` and
+  `%cd` are the pointed-at commit's, so a reset to a 2020 commit would be dated
+  2020; `%gd` is the only place the entry's own time appears.
+- `<CR>` with nothing marked diffs against the entry below (`prev_diff`), not the
+  first parent: the state before that event. Repeats are stepped over.
+- Options are an allowlist (`_REFLOG_OPTS`) rather than a denylist: `-n` and
+  `--since` only, since the `@{N}` index is derived from list position and
+  `--until` would shift it.
 
 ### Rail layout (`_layout`)
 
