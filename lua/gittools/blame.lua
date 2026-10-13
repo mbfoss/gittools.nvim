@@ -339,6 +339,17 @@ local function _show_layer(session, layer, view)
     end)
 end
 
+--- The sidebar's cursor line, or nil when the sidebar is not the current
+--- window. An autocommand or buffer-local mapping can still run with the user
+--- elsewhere, and `0` would then hand back that other window's cursor.
+---@param session GitTools.BlameSession
+---@return integer? lnum
+local function _sidebar_lnum(session)
+    local win = vim.api.nvim_get_current_win()
+    if vim.api.nvim_win_get_buf(win) ~= session.blame_buf then return nil end
+    return vim.api.nvim_win_get_cursor(win)[1]
+end
+
 --- The file window's view expressed from the sidebar's cursor, which is where
 --- the user is when pressing `R` / `<BS>`.
 ---@param session GitTools.BlameSession
@@ -448,6 +459,7 @@ end
 --- Annotate the current buffer with `git blame` in a scroll-bound sidebar.
 function M.blame()
     local buf = vim.api.nvim_get_current_buf()
+    local win = vim.api.nvim_get_current_win()
     if vim.bo[buf].buftype ~= "" then
         _notify("GitTool blame needs a normal file buffer", vim.log.levels.WARN)
         return
@@ -490,6 +502,12 @@ function M.blame()
 
     _end_blame()
 
+    -- Re-assert the window the file was in: the `git` call above pumped the
+    -- event loop, so a scheduled callback may have moved the cursor since.
+    -- The split lands on this window and no other.
+    vim.api.nvim_set_current_win(win)
+    local view = vim.fn.winsaveview()
+
     local lines, width = _format_lines(entries)
 
     local blame_buf = vim.api.nvim_create_buf(false, true)
@@ -501,9 +519,6 @@ function M.blame()
     vim.bo[blame_buf].filetype   = "gittoolsblame"
     pcall(vim.api.nvim_buf_set_name, blame_buf, "gittools://blame/" .. rel)
     _highlight(blame_buf, entries)
-
-    local file_win = vim.api.nvim_get_current_win()
-    local view = vim.fn.winsaveview()
 
     vim.cmd("leftabove vsplit")
     local blame_win = vim.api.nvim_get_current_win()
@@ -531,7 +546,7 @@ function M.blame()
         group     = group,
         root      = root,
         rel       = rel,
-        file_win  = file_win,
+        file_win  = win,
         file_buf  = buf,
         shown_buf = buf,
         stack     = { { buf = buf, entries = entries, label = rel } },
@@ -548,17 +563,17 @@ function M.blame()
     -- Line up the sidebar with the file view, then let scrollbind take over.
     vim.api.nvim_win_set_cursor(blame_win, { math.min(view.lnum, #lines), 0 })
     vim.fn.winrestview({ topline = view.topline })
-    vim.api.nvim_set_current_win(file_win)
+    vim.api.nvim_set_current_win(win)
     vim.fn.winrestview(view)
     vim.cmd("syncbind")
 
-    for _, win in ipairs({ file_win, blame_win }) do
+    for _, w in ipairs({ win, blame_win }) do
         vim.api.nvim_create_autocmd("WinClosed", {
             group    = group,
-            pattern  = tostring(win),
+            pattern  = tostring(w),
             callback = function()
-                if win == session.file_win then session.file_win = nil end
-                if win == session.blame_win then session.blame_win = nil end
+                if w == session.file_win then session.file_win = nil end
+                if w == session.blame_win then session.blame_win = nil end
                 _end_soon(session)
             end,
         })
@@ -594,8 +609,8 @@ function M.blame()
         group    = group,
         buffer   = blame_buf,
         callback = function()
-            local lnum = vim.api.nvim_win_get_cursor(0)[1]
-            local e = session.entries[lnum]
+            local lnum = _sidebar_lnum(session)
+            local e = lnum and session.entries[lnum]
             if not e then return end
             local msg = _is_uncommitted(e) and "Not committed yet" or e.summary
             vim.api.nvim_echo({ { msg, "Normal" } }, false, {})
@@ -603,14 +618,14 @@ function M.blame()
     })
 
     vim.keymap.set("n", "<CR>", function()
-        local lnum = vim.api.nvim_win_get_cursor(0)[1]
-        local e = session.entries[lnum]
+        local lnum = _sidebar_lnum(session)
+        local e = lnum and session.entries[lnum]
         if e then _diff_commit(root, e) end
     end, { buffer = blame_buf, desc = "Diff commit under cursor" })
 
     vim.keymap.set("n", "K", function()
-        local lnum = vim.api.nvim_win_get_cursor(0)[1]
-        local e = session.entries[lnum]
+        local lnum = _sidebar_lnum(session)
+        local e = lnum and session.entries[lnum]
         if e then _show_details(root, e) end
     end, { buffer = blame_buf, desc = "Show details of commit under cursor" })
 

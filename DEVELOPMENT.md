@@ -218,6 +218,11 @@ cell connect, with rounded corners.
   since `R` / `<BS>` swap the window's buffer themselves.
 - `_pop` clears a level's autocmds before deleting its copy, so the deletion
   doesn't read as the user closing it.
+- The sidebar's autocmds and mappings read the cursor through `_sidebar_lnum`,
+  which names the sidebar window: they can fire while the user is in another
+  window, where no cursor is ours to read.
+- `blame()` captures the window alongside the buffer and re-asserts it before
+  splitting, so the split lands there and no window else is touched.
 
 ## merge
 
