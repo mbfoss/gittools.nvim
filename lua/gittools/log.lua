@@ -520,10 +520,11 @@ local function _show(session)
     -- `:GitTool blame` sidebar with scrollbind still on). `spell` goes the same
     -- way: inherited from a prose buffer it would underline hashes, author
     -- names and half the subject lines.
-    vim.wo[win].scrollbind = false
-    vim.wo[win].cursorbind = false
-    vim.wo[win].spell = false
-    vim.wo[win].wrap = false
+    local lwo = vim.wo[win][0]
+    lwo.scrollbind = false
+    lwo.cursorbind = false
+    lwo.spell = false
+    lwo.wrap = false
 
     session.win = win
     _session = session

@@ -638,23 +638,23 @@ local function _open_list(session)
 
     vim.cmd("botright new")
     local win = vim.api.nvim_get_current_win()
-    local wo  = vim.wo[win]
+    local lwo = vim.wo[win][0]
     vim.api.nvim_win_set_buf(win, buf)
     -- Name what the list is a list *of*, in the winbar above it. Assigned
     -- before sizing (the winbar is drawn inside the window, taking a row) and
     -- unconditionally, so a winbar inherited by the split doesn't linger.
-    wo.winbar = session.title and _winbar(session.title) or ""
-    vim.api.nvim_win_set_height(win, math.min(15, #session.entries) + (wo.winbar ~= "" and 1 or 0))
+    lwo.winbar = session.title and _winbar(session.title) or ""
+    vim.api.nvim_win_set_height(win, math.min(15, #session.entries) + (lwo.winbar ~= "" and 1 or 0))
     -- A new split inherits window-local options (scrollbind, cursorbind, ...)
     -- from the window it split off of; reset them so the list can't end up
     -- scroll-linked to a diff pane, and dress it as a picker.
-    wo.scrollbind     = false
-    wo.cursorbind     = false
-    wo.wrap           = false
-    wo.number         = false
-    wo.relativenumber = false
-    wo.cursorline     = true
-    wo.winfixheight   = true
+    lwo.scrollbind     = false
+    lwo.cursorbind     = false
+    lwo.wrap           = false
+    lwo.number         = false
+    lwo.relativenumber = false
+    lwo.cursorline     = true
+    lwo.winfixheight   = true
     session.list_win  = win
 
     -- Closing the list on its own also collapses the session, so the user only

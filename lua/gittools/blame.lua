@@ -73,7 +73,7 @@ local _session = nil
 ---@param saved table<string, any>
 local function _restore_opts(win, saved)
     for opt, val in pairs(saved) do
-        pcall(function() vim.wo[win][opt] = val end)
+        pcall(function() vim.wo[win][0][opt] = val end)
     end
 end
 
@@ -261,14 +261,15 @@ local function _bind_windows(session)
     ---@cast fw integer
     ---@cast bw integer
     for _, opt in ipairs({ "scrollbind", "cursorbind", "wrap", "foldenable" }) do
-        session.saved[opt] = vim.wo[fw][opt]
-        session.saved_side[opt] = vim.wo[bw][opt]
+        session.saved[opt] = vim.wo[fw][0][opt]
+        session.saved_side[opt] = vim.wo[bw][0][opt]
     end
     for _, win in ipairs({ fw, bw }) do
-        vim.wo[win].scrollbind = true
-        vim.wo[win].cursorbind = true
-        vim.wo[win].wrap       = false
-        vim.wo[win].foldenable = false
+        local lwo = vim.wo[win][0]
+        lwo.scrollbind = true
+        lwo.cursorbind = true
+        lwo.wrap       = false
+        lwo.foldenable = false
     end
 end
 
@@ -321,10 +322,11 @@ local function _show_layer(session, layer, view)
     session.shown_buf = layer.buf
     vim.api.nvim_win_set_buf(fw, layer.buf)
     -- A buffer new to the window may bring window options of its own.
-    vim.wo[fw].scrollbind = true
-    vim.wo[fw].cursorbind = true
-    vim.wo[fw].wrap       = false
-    vim.wo[fw].foldenable = false
+    local lwo = vim.wo[fw][0]
+    lwo.scrollbind = true
+    lwo.cursorbind = true
+    lwo.wrap       = false
+    lwo.foldenable = false
     _fill_sidebar(session, layer.entries)
     pcall(vim.api.nvim_buf_set_name, session.blame_buf, "gittools://blame/" .. layer.label)
 
@@ -528,18 +530,19 @@ function M.blame()
     local saved_side = {}
     for _, opt in ipairs({ "winfixwidth", "number", "relativenumber",
         "signcolumn", "foldcolumn", "list", "winbar" }) do
-        saved_side[opt] = vim.wo[blame_win][opt]
+        saved_side[opt] = vim.wo[blame_win][0][opt]
     end
 
     vim.api.nvim_win_set_buf(blame_win, blame_buf)
     vim.api.nvim_win_set_width(blame_win, width + 1)
-    vim.wo[blame_win].winfixwidth    = true
-    vim.wo[blame_win].number         = false
-    vim.wo[blame_win].relativenumber = false
-    vim.wo[blame_win].signcolumn     = "no"
-    vim.wo[blame_win].foldcolumn     = "0"
-    vim.wo[blame_win].list           = false
-    vim.wo[blame_win].winbar         = ""
+    local lwo = vim.wo[blame_win][0]
+    lwo.winfixwidth    = true
+    lwo.number         = false
+    lwo.relativenumber = false
+    lwo.signcolumn     = "no"
+    lwo.foldcolumn     = "0"
+    lwo.list           = false
+    lwo.winbar         = ""
 
     local group = vim.api.nvim_create_augroup("gittools.blame", { clear = true })
     local session = {
