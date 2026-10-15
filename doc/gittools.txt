@@ -79,8 +79,10 @@ Any plugin manager, or drop the repository into your package path. No `setup()`
 call and nothing to configure: `plugin/` registers `:GitTool`, and the feature
 modules load on first use.
 
+lazy.nvim <https://github.com/folke/lazy.nvim>:
+
 >lua
-    { "gittools.nvim" }
+    { "mbfoss/gittools.nvim", cmd = "GitTool" }
 <
 
 From `pack/*/opt`:
