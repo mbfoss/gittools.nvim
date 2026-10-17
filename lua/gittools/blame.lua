@@ -48,6 +48,8 @@ end
 ---                                     or `rev:path`
 ---@field view    table?                the file window's view, saved when a
 ---                                     level is pushed on top of this one
+---@field rev     string?               history levels only: the commit blamed
+---@field path    string?               history levels only: the path there
 
 --- The active blame session. Only one exists at a time. nil when idle.
 ---@class GitTools.BlameSession
@@ -421,7 +423,10 @@ local function _reblame(session)
     below.view = vim.tbl_extend("force",
         vim.api.nvim_win_call(session.file_win, vim.fn.winsaveview),
         { lnum = lnum, topline = lnum - offset })
-    local layer = { buf = buf, entries = entries, label = rev:sub(1, 7) .. ":" .. path }
+    local layer = {
+        buf = buf, entries = entries, label = rev:sub(1, 7) .. ":" .. path,
+        rev = rev, path = path,
+    }
     session.stack[#session.stack + 1] = layer
 
     -- Losing this copy from the window ends the session the way losing the
@@ -639,6 +644,52 @@ function M.blame()
         { buffer = blame_buf, desc = "Back to the blame R came from" })
 
     keyhelp.map(blame_buf, { "<CR>", "K", "R", "<BS>" })
+end
+
+--- Whether the current buffer belongs to the live blame session.
+---@return boolean
+function M.is_active()
+    local s = _session
+    if not s then return false end
+    local buf = vim.api.nvim_get_current_buf()
+    return buf == s.file_buf or buf == s.blame_buf
+end
+
+--- Re-run the blame for the level currently shown, keeping the cursor line.
+function M.refresh()
+    if not M.is_active() then return end
+    local s = _session
+    ---@cast s GitTools.BlameSession
+    if not (s.blame_win and vim.api.nvim_win_is_valid(s.blame_win)) then return end
+
+    local layer = s.stack[#s.stack]
+    local out, err
+    if layer.buf == s.file_buf then
+        local contents = table.concat(
+            vim.api.nvim_buf_get_lines(s.file_buf, 0, -1, false), "\n") .. "\n"
+        out, err = git.run_raw(s.root,
+            { "blame", "--line-porcelain", "--contents", "-", "--", s.rel }, contents)
+    else
+        out, err = git.run_raw(s.root,
+            { "blame", "--line-porcelain", layer.rev, "--", layer.path })
+    end
+    if not out then
+        _notify(err ~= "" and err or "git blame failed", vim.log.levels.ERROR)
+        return
+    end
+
+    local entries = _parse_blame(out)
+    if #entries == 0 then
+        _notify("Nothing to blame")
+        return
+    end
+
+    local lnum, offset = _sidebar_pos(s)
+    layer.entries = entries
+    _show_layer(s, layer, {
+        lnum    = math.min(lnum, #entries),
+        topline = math.max(1, lnum - offset),
+    })
 end
 
 return M

@@ -109,49 +109,19 @@ local function _collect_dir_changes(a_abs, b_abs)
     return changes
 end
 
---- Diff two filesystem paths that need not lie in any git repository: either
---- two files, or two directories (compared recursively via `git diff
---- --no-index`). Two directories give one list entry per differing file, in the
---- same side-by-side layout `:GitTool diff` uses; two files open the diff on its
---- own, with no file list. Both sides are the real files on
---- disk, so either can be edited and written from inside the diff (Neovim
---- marks a file it can't write 'readonly' as usual). The two paths must be the
---- same kind (both files or both directories).
----@param a string left path (file or directory)
----@param b string right path (file or directory)
-function M.diffpaths(a, b)
-    if not (a and b) or a == "" or b == "" then
-        _notify("diffpaths needs two paths", vim.log.levels.ERROR)
-        return
-    end
-
-    -- fnamemodify(":p") absolutises and keeps a trailing slash on directories;
-    -- strip it so prefix arithmetic below is uniform for files and dirs.
-    local a_abs = (vim.fn.fnamemodify(a, ":p"):gsub("/+$", ""))
-    local b_abs = (vim.fn.fnamemodify(b, ":p"):gsub("/+$", ""))
-
-    local a_dir = vim.fn.isdirectory(a_abs) == 1
-    local b_dir = vim.fn.isdirectory(b_abs) == 1
-    for path, is_dir in pairs({ [a_abs] = a_dir, [b_abs] = b_dir }) do
-        if not is_dir and vim.fn.filereadable(path) == 0 then
-            _notify("No such file or directory: " .. path, vim.log.levels.ERROR)
-            return
-        end
-    end
-    if a_dir ~= b_dir then
-        _notify("Both paths must be files, or both must be directories", vim.log.levels.ERROR)
-        return
-    end
-
+--- The diff-session items for `a_abs` against `b_abs`. `a_dir` selects the
+--- recursive directory comparison; otherwise the two paths are a single file
+--- each. Returns nil after notifying when git fails.
+---@param a_abs string absolute path (left)
+---@param b_abs string absolute path (right)
+---@param a_dir boolean both paths are directories
+---@return GitTools.DiffItem[]? items
+local function _build_items(a_abs, b_abs, a_dir)
     ---@type GitTools.PathChange[]
     local changes
     if a_dir then
         local collected = _collect_dir_changes(a_abs, b_abs)
-        if not collected then return end -- git failure, already notified
-        if #collected == 0 then
-            _notify("No changes found")
-            return
-        end
+        if not collected then return nil end -- git failure, already notified
         changes = collected
     else
         changes = { {
@@ -197,6 +167,49 @@ function M.diffpaths(a, b)
             right_sha = submodule and _real_sha(right_sha) or nil,
         }
     end
+    return items
+end
+
+--- Diff two filesystem paths that need not lie in any git repository: either
+--- two files, or two directories (compared recursively via `git diff
+--- --no-index`). Two directories give one list entry per differing file, in the
+--- same side-by-side layout `:GitTool diff` uses; two files open the diff on its
+--- own, with no file list. Both sides are the real files on
+--- disk, so either can be edited and written from inside the diff (Neovim
+--- marks a file it can't write 'readonly' as usual). The two paths must be the
+--- same kind (both files or both directories).
+---@param a string left path (file or directory)
+---@param b string right path (file or directory)
+function M.diffpaths(a, b)
+    if not (a and b) or a == "" or b == "" then
+        _notify("diffpaths needs two paths", vim.log.levels.ERROR)
+        return
+    end
+
+    -- fnamemodify(":p") absolutises and keeps a trailing slash on directories;
+    -- strip it so prefix arithmetic below is uniform for files and dirs.
+    local a_abs = (vim.fn.fnamemodify(a, ":p"):gsub("/+$", ""))
+    local b_abs = (vim.fn.fnamemodify(b, ":p"):gsub("/+$", ""))
+
+    local a_dir = vim.fn.isdirectory(a_abs) == 1
+    local b_dir = vim.fn.isdirectory(b_abs) == 1
+    for path, is_dir in pairs({ [a_abs] = a_dir, [b_abs] = b_dir }) do
+        if not is_dir and vim.fn.filereadable(path) == 0 then
+            _notify("No such file or directory: " .. path, vim.log.levels.ERROR)
+            return
+        end
+    end
+    if a_dir ~= b_dir then
+        _notify("Both paths must be files, or both must be directories", vim.log.levels.ERROR)
+        return
+    end
+
+    local items = _build_items(a_abs, b_abs, a_dir)
+    if not items then return end -- git failure, already notified
+    if #items == 0 then
+        _notify("No changes found")
+        return
+    end
 
     -- Two files are a single comparison: skip the file list, which would only
     -- be a one-line split taking up room below the diff. Two directories get a
@@ -211,7 +224,11 @@ function M.diffpaths(a, b)
         title = { left = vim.fn.fnamemodify(a_abs, ":~:."), right = vim.fn.fnamemodify(b_abs, ":~:.") }
     end
 
-    session.open(items, { list = a_dir, title = title })
+    session.open(items, {
+        list    = a_dir,
+        title   = title,
+        refresh = function() return _build_items(a_abs, b_abs, a_dir) end,
+    })
 end
 
 return M

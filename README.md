@@ -20,6 +20,7 @@ A git-backed front end for Neovim's native diff facilities, under a single
 | `GitTool reflog [<ref>] [<opt>...]` | browse `git reflog` the same way, `HEAD` by default |
 | `GitTool blame` | annotate the current buffer in a scroll-bound sidebar |
 | `GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]` | resolve merge conflicts inline |
+| `GitTool refresh` | re-read the session the current buffer belongs to |
 <!-- panvimdoc-ignore-start -->
 ![gittools.nvim](https://raw.githubusercontent.com/mbfoss/gittools.nvim/assets/demos/demo.gif)
 
@@ -488,6 +489,22 @@ All conflict maps share an `x` prefix, matching the `]x` / `[x` motions:
   hand edit or a resolve, `xa` declines rather than insert text from the wrong
   region.
 - An add/add conflict has no ancestor, so `xa` never applies there.
+
+## `GitTool refresh` <!-- tag: refresh -->
+
+Re-reads the session the current buffer belongs to, in place:
+
+- `diff` / `diffpaths`: recollects the changed files and redraws the list; the
+  cursor stays on the same path when it still differs.
+- `diffthis`: re-fetches the git side. The live buffer is untouched.
+- `blame`: re-runs the blame of the level on screen.
+- `log`, `logthis`, `graph`, `stashlist`, `reflog`: re-runs the query; the mark
+  and the cursor's entry stay where they still exist.
+- No session: reports that there is nothing to refresh.
+
+```vim
+:GitTool refresh
+```
 
 ## Highlights <!-- tag: highlights -->
 

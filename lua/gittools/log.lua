@@ -66,6 +66,9 @@ end
 ---                        below it rather than against its parent (the reflog)
 ---@field entries GitTools.LogEntry[]           by buffer line
 ---@field line_of table<string, integer>        entry key -> buffer line
+---@field refresh (fun(): GitTools.LogEntry[]?)?  re-run the query; nil on a
+---                        git failure (already reported)
+---@field empty_msg string? what to say when a refresh finds nothing
 ---@type GitTools.LogSession?
 local _session = nil
 
@@ -707,13 +710,17 @@ local function _run_log(name, opts, extra_args, parse, reverse)
     args[#args + 1] = "--"
     if rel then args[#args + 1] = rel end
 
-    local out, err = git.run(root, args)
-    if not out then
-        _notify(err ~= "" and err or "git log failed", vim.log.levels.ERROR)
-        return
+    local function fetch()
+        local out, err = git.run(root, args)
+        if not out then
+            _notify(err ~= "" and err or "git log failed", vim.log.levels.ERROR)
+            return nil
+        end
+        return parse(out)
     end
 
-    local entries = parse(out)
+    local entries = fetch()
+    if not entries then return end
     if #entries == 0 then
         _notify("No commits found")
         return
@@ -731,6 +738,8 @@ local function _run_log(name, opts, extra_args, parse, reverse)
         marked = nil,
         entries = entries,
         line_of = line_of,
+        refresh = fetch,
+        empty_msg = "No commits found",
     })
 end
 
@@ -782,7 +791,15 @@ local function _run_stash_log()
     end
 
     local args = { "stash", "list", "--date=short", "--pretty=format:%H\t%P\t%ad\t%an\t%s" }
-    local entries = _parse_log((git.run(root, args)) or "")
+    local function fetch()
+        local fresh = _parse_log((git.run(root, args)) or "")
+        for i, entry in ipairs(fresh) do
+            entry.ref = string.format("stash@{%d}", i - 1)
+        end
+        return fresh
+    end
+
+    local entries = fetch()
     if #entries == 0 then
         _notify("No stashes found")
         return
@@ -790,11 +807,18 @@ local function _run_stash_log()
 
     local line_of = {}
     for i, entry in ipairs(entries) do
-        entry.ref = string.format("stash@{%d}", i - 1)
         line_of[_key(entry)] = i
     end
 
-    _show({ root = root, label = "stashlist", marked = nil, entries = entries, line_of = line_of })
+    _show({
+        root = root,
+        label = "stashlist",
+        marked = nil,
+        entries = entries,
+        line_of = line_of,
+        refresh = fetch,
+        empty_msg = "No stashes found",
+    })
 end
 
 --- List the history of the *current buffer's file*, starting from `opts.rev`
@@ -890,13 +914,26 @@ local function _run_reflog(opts)
     }
     vim.list_extend(args, opts.args or {})
 
-    local out, err = git.run(root, args)
-    if not out then
-        _notify(err ~= "" and err or "git reflog failed", vim.log.levels.ERROR)
-        return
+    local function fetch()
+        local out, err = git.run(root, args)
+        if not out then
+            _notify(err ~= "" and err or "git reflog failed", vim.log.levels.ERROR)
+            return nil
+        end
+        local fresh = _parse_log(out)
+        for i, entry in ipairs(fresh) do
+            -- `%gd` holds the selector in the date format asked for above, e.g.
+            -- "HEAD@{2026-10-11 18:52}": git's own ref name, and the entry's own
+            -- time, unlike `%ad`/`%cd`. The index is the list position.
+            local name, time = entry.date:match("^(.-)@{(.*)}$")
+            entry.ref = string.format("%s@{%d}", name or ref, i - 1)
+            entry.date = time or entry.date
+        end
+        return fresh
     end
 
-    local entries = _parse_log(out)
+    local entries = fetch()
+    if not entries then return end
     if #entries == 0 then
         _notify("No reflog entries found")
         return
@@ -904,12 +941,6 @@ local function _run_reflog(opts)
 
     local line_of = {}
     for i, entry in ipairs(entries) do
-        -- `%gd` holds the selector in the date format asked for above, e.g.
-        -- "HEAD@{2026-10-11 18:52}": git's own ref name, and the entry's own
-        -- time, unlike `%ad`/`%cd`. The index is the list position.
-        local name, time = entry.date:match("^(.-)@{(.*)}$")
-        entry.ref = string.format("%s@{%d}", name or ref, i - 1)
-        entry.date = time or entry.date
         line_of[_key(entry)] = i
     end
 
@@ -920,6 +951,8 @@ local function _run_reflog(opts)
         prev_diff = true,
         entries = entries,
         line_of = line_of,
+        refresh = fetch,
+        empty_msg = "No reflog entries found",
     })
 end
 
@@ -929,6 +962,52 @@ end
 ---@param opts GitTools.LogOpts?  `ref` and `args` only
 function M.reflog(opts)
     _run_reflog(opts or {})
+end
+
+--- Whether the current buffer is the live log view's.
+---@return boolean
+function M.is_active()
+    return _session ~= nil and _session.buf == vim.api.nvim_get_current_buf()
+end
+
+--- Refresh the log view the current buffer belongs to, keeping the mark and
+--- the cursor's entry where they still exist.
+function M.refresh()
+    if not M.is_active() then return end
+    local s = _session
+    ---@cast s GitTools.LogSession
+    if not s.refresh then return end
+
+    local ok, entries = pcall(s.refresh)
+    if not ok then
+        _notify("Refresh failed: " .. tostring(entries), vim.log.levels.ERROR)
+        return
+    end
+    if entries == nil then return end
+    if #entries == 0 then
+        _notify(s.empty_msg or "No entries found")
+        _end_log()
+        return
+    end
+
+    local cursor = vim.api.nvim_win_is_valid(s.win or -1)
+        and vim.api.nvim_win_get_cursor(s.win)[1] or 1
+    local peeked = s.entries[cursor]
+    local keep_key = peeked and peeked.hash and _key(peeked) or nil
+
+    s.entries = entries
+    s.line_of = {}
+    for i, entry in ipairs(entries) do
+        if entry.hash then s.line_of[_key(entry)] = i end
+    end
+    if s.marked and not s.line_of[s.marked] then s.marked = nil end
+    _render(s)
+
+    local lnum = math.min(cursor, #entries)
+    if keep_key and s.line_of[keep_key] then lnum = s.line_of[keep_key] end
+    if s.win and vim.api.nvim_win_is_valid(s.win) then
+        vim.api.nvim_win_set_cursor(s.win, { lnum, 0 })
+    end
 end
 
 return M

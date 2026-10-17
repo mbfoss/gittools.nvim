@@ -241,13 +241,14 @@ local function _side_text(root, side)
     return "?"
 end
 
---- Hand `changes` to the diff-session engine as items comparing `left` against
---- `right` in `root`.
+--- The diff-session items for `changes`, comparing `left` against `right` in
+--- `root`.
 ---@param root    string repo root
 ---@param left    GitTools.Side
 ---@param right   GitTools.Side
----@param changes GitTools.Change[] non-empty
-local function _open_changes(root, left, right, changes)
+---@param changes GitTools.Change[]
+---@return GitTools.DiffItem[]
+local function _items(root, left, right, changes)
     ---@type GitTools.DiffItem[]
     local items = {}
     for _, change in ipairs(changes) do
@@ -263,10 +264,24 @@ local function _open_changes(root, left, right, changes)
             right_sha = change.right_sha,
         }
     end
-    session.open(items, { title = {
-        left  = _side_text(root, left),
-        right = _side_text(root, right),
-    } })
+    return items
+end
+
+--- Hand `changes` to the diff-session engine as items comparing `left` against
+--- `right` in `root`, along with a way to rebuild those items on refresh.
+---@param root    string repo root
+---@param left    GitTools.Side
+---@param right   GitTools.Side
+---@param changes GitTools.Change[] non-empty
+---@param refresh fun(): GitTools.DiffItem[]
+local function _open_changes(root, left, right, changes, refresh)
+    session.open(_items(root, left, right, changes), {
+        title = {
+            left  = _side_text(root, left),
+            right = _side_text(root, right),
+        },
+        refresh = refresh,
+    })
 end
 
 --- The set of paths (relative to the repo root) that differ between `left`
@@ -367,7 +382,9 @@ function M.diff(opts)
         return
     end
 
-    _open_changes(root, left, right, changes)
+    _open_changes(root, left, right, changes, function()
+        return _items(root, left, right, _collect_changes(root, left, right, paths, cwd))
+    end)
 end
 
 --- Open a diff session over the submodule an entry of another diff session
@@ -431,7 +448,9 @@ function M.diff_submodule(data)
         return
     end
 
-    _open_changes(root, left, right, changes)
+    _open_changes(root, left, right, changes, function()
+        return _items(root, left, right, _collect_changes(root, left, right))
+    end)
 end
 
 return M

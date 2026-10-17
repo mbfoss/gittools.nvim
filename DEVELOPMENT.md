@@ -83,6 +83,9 @@ content*, not the content:
   (E445).
 - `setting_up` / `closing` are reentrancy guards; `shown_line` makes a repeat
   setup for the on-screen entry a no-op.
+- `opts.refresh` gives the engine a way to rebuild its items from the original
+  comparison. `:GitTool refresh` re-collects, rewrites the list in place, and
+  keeps the shown path where it survives; an empty result closes the session.
 
 ### `]f` / `[f`
 
@@ -141,7 +144,9 @@ survive.
 
 ## log / graph
 
-Both run one `git log` with a fixed `--pretty=format:` and parse it.
+Both run one `git log` with a fixed `--pretty=format:` and parse it. The
+command's arguments are captured in a `fetch` closure stored on the session, so
+`:GitTool refresh` re-runs the same query in place.
 
 - `_rejected_opt` rejects options which replace or extend the format
   (`--pretty`, `--format`, `--oneline`, `--stat`, `--patch`, `--name-status`,

@@ -81,6 +81,9 @@ local keyhelp    = require("gittools.util.keyhelp")
 ---@field setting_up boolean   reentrancy guard to stop infinite event loops
 ---@field shown_line integer?  list line whose diff is currently built, so a
 ---                            repeat setup for the same entry is a no-op
+---@field show_list  boolean   whether the session drives a file list
+---@field refresh    (fun(): GitTools.DiffItem[]?)?  rebuild the items from the
+---                            current state; nil when the caller cannot refresh
 
 -- Every live diff session. Sessions run in parallel, one per tab: each owns a
 -- whole tab (`ui.claim_tab` only ever reuses a blank one, so two sessions can
@@ -200,7 +203,31 @@ local function _entry_label(item)
     return (item.right_rel or item.left_rel) --[[@as string]]
 end
 
---- Color each list line by its leading status letter (see `_STATUS_HL`).
+--- Build the list rows for `items`.
+---@param items GitTools.DiffItem[]
+---@return GitTools.DiffEntry[]
+local function _make_entries(items)
+    ---@type GitTools.DiffEntry[]
+    local entries = {}
+    for _, item in ipairs(items) do
+        entries[#entries + 1] = {
+            status = item.status,
+            label  = _entry_label(item),
+            data   = {
+                root      = item.root or "",
+                left_rel  = item.left_rel,
+                right_rel = item.right_rel,
+                left      = item.left,
+                right     = item.right,
+                submodule = item.submodule,
+                left_sha  = item.left_sha,
+                right_sha = item.right_sha,
+            },
+        }
+    end
+    return entries
+end
+
 --- Rename/copy lines additionally get their arrow colored to match the status
 --- letter, and the superseded (old) path dimmed. Scoped to `bufnr` alone so it
 --- can't bleed into unrelated buffers elsewhere in the session.
@@ -707,6 +734,143 @@ local function _open_list(session)
     })
 end
 
+--- Whether `buf` belongs to `session`: its list, one of its generated
+--- snapshots, or whatever either pane currently shows (which may be the user's
+--- own worktree-file buffer).
+---@param session GitTools.DiffSession
+---@param buf     integer
+---@return boolean
+local function _session_has_buf(session, buf)
+    if session.list_buf == buf then return true end
+    if vim.tbl_contains(session.buffers, buf) then return true end
+    for _, win in ipairs({ session.left_win, session.right_win }) do
+        if win and vim.api.nvim_win_is_valid(win)
+            and vim.api.nvim_win_get_buf(win) == buf then
+            return true
+        end
+    end
+    return false
+end
+
+--- The session `buf` belongs to, preferring the current tab's.
+---@param buf integer
+---@return GitTools.DiffSession?
+local function _session_for_buf(buf)
+    local current = _current_session()
+    if current and _session_has_buf(current, buf) then return current end
+    for _, session in ipairs(_sessions) do
+        if _session_has_buf(session, buf) then return session end
+    end
+    return nil
+end
+
+--- The identity of an entry across a refresh: a rename/delete keeps its shown
+--- path, so the row can be found again even when its status letter changes.
+---@param entry GitTools.DiffEntry
+---@return string
+local function _entry_key(entry)
+    return entry.data.right_rel or entry.data.left_rel or entry.label
+end
+
+--- Re-render the list buffer's lines and fit the window to them.
+---@param session GitTools.DiffSession
+local function _render_list(session)
+    local buf = session.list_buf
+    if not (buf and vim.api.nvim_buf_is_valid(buf)) then return end
+
+    local lines = {}
+    for _, entry in ipairs(session.entries) do
+        lines[#lines + 1] = string.format("%s %s", entry.status, entry.label)
+    end
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+
+    local win = session.list_win
+    if win and vim.api.nvim_win_is_valid(win) then
+        local lwo = vim.wo[win][0]
+        lwo.winbar = session.title and _winbar(session.title) or ""
+        vim.api.nvim_win_set_height(win,
+            math.min(15, #session.entries) + (lwo.winbar ~= "" and 1 or 0))
+    end
+end
+
+--- Replace `session`'s entries with `items`, keeping the shown path where it
+--- survives and re-running the diff over the rebuilt entry.
+---@param session GitTools.DiffSession
+---@param items   GitTools.DiffItem[]
+local function _rebuild(session, items)
+    local old_entries = session.entries
+    local keep = session.shown_line
+    if session.list_win and vim.api.nvim_win_is_valid(session.list_win) then
+        keep = keep or vim.api.nvim_win_get_cursor(session.list_win)[1]
+    end
+    keep = keep or 1
+    local keep_key = old_entries[keep] and _entry_key(old_entries[keep])
+
+    -- The old snapshots are replaced below; delete them only after the panes
+    -- have moved off them, so no window blanks out mid-refresh.
+    local old_buffers = session.buffers
+    session.buffers = {}
+    session.entries = _make_entries(items)
+    session.shown_line = nil
+
+    local lnum = math.min(keep, #session.entries)
+    if keep_key then
+        for i, entry in ipairs(session.entries) do
+            if _entry_key(entry) == keep_key then
+                lnum = i
+                break
+            end
+        end
+    end
+
+    if session.show_list then
+        _render_list(session)
+        local lwin = session.list_win
+        if lwin and vim.api.nvim_win_is_valid(lwin) then
+            vim.api.nvim_win_set_cursor(lwin, { lnum, 0 })
+        end
+    end
+
+    local entry = session.entries[lnum]
+    if entry then _setup_diff(session, entry, lnum) end
+
+    for _, bufnr in ipairs(old_buffers) do
+        if vim.api.nvim_buf_is_valid(bufnr) and #vim.fn.win_findbuf(bufnr) == 0 then
+            pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+        end
+    end
+end
+
+--- Whether the current buffer belongs to a live diff session.
+---@return boolean
+function M.is_active()
+    return _session_for_buf(vim.api.nvim_get_current_buf()) ~= nil
+end
+
+--- Refresh the diff session the current buffer belongs to, in place: rebuild
+--- its item list from the original comparison, keeping the shown path where it
+--- still exists.
+function M.refresh()
+    local session = _session_for_buf(vim.api.nvim_get_current_buf())
+    if not session or not session.refresh then return end
+
+    local ok, items = pcall(session.refresh)
+    if not ok then
+        vim.notify("[gittools] Refresh failed: " .. tostring(items), vim.log.levels.ERROR)
+        return
+    end
+    if items == nil then return end
+    if #items == 0 then
+        vim.notify("[gittools] No changes found", vim.log.levels.INFO)
+        _close_session(session)
+        return
+    end
+
+    _rebuild(session, items)
+end
+
 ---@class GitTools.DiffOpts
 ---@field list boolean? open the driving file list in a bottom split (default
 ---                     true). Pass false for a comparison that is inherently a
@@ -715,6 +879,10 @@ end
 ---@field title { left: string, right: string }? labels for the two sides of the
 ---                     comparison, shown in the list window's winbar (only used
 ---                     when the list is).
+---@field refresh (fun(): GitTools.DiffItem[]?)?  rebuild the items from the
+---                     current repository/filesystem state; nil if the caller
+---                     cannot refresh. Returning nil means the rebuild failed
+---                     (already reported); an empty list closes the session.
 
 --- Open a diff session over `items`: build the side-by-side layout, the driving
 --- file list, and show the first item up front (so the layout opens on a real
@@ -727,24 +895,7 @@ end
 function M.open(items, opts)
     local show_list = not (opts and opts.list == false)
     local title     = show_list and opts and opts.title or nil
-    ---@type GitTools.DiffEntry[]
-    local entries = {}
-    for _, item in ipairs(items) do
-        entries[#entries + 1] = {
-            status = item.status,
-            label  = _entry_label(item),
-            data   = {
-                root      = item.root or "",
-                left_rel  = item.left_rel,
-                right_rel = item.right_rel,
-                left      = item.left,
-                right     = item.right,
-                submodule = item.submodule,
-                left_sha  = item.left_sha,
-                right_sha = item.right_sha,
-            },
-        }
-    end
+    local entries   = _make_entries(items)
 
     _next_id = _next_id + 1
     ---@type GitTools.DiffSession
@@ -762,6 +913,8 @@ function M.open(items, opts)
         closing    = false,
         setting_up = false,
         shown_line = nil,
+        show_list  = show_list,
+        refresh    = opts and opts.refresh or nil,
     }
     _sessions[#_sessions + 1] = session
 

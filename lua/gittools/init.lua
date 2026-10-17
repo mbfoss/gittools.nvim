@@ -3,13 +3,14 @@ local M        = {}
 ---@diagnostic disable-next-line: deprecated
 local unpack   = table.unpack or unpack
 
-local git      = require("gittools.util.git")
-local difftool = require("gittools.diff")
-local diffpaths = require("gittools.diffpaths")
-local diffthis = require("gittools.diffthis")
-local logtool  = require("gittools.log")
-local blame    = require("gittools.blame")
-local merge    = require("gittools.merge")
+local git         = require("gittools.util.git")
+local difftool    = require("gittools.diff")
+local diffpaths   = require("gittools.diffpaths")
+local diffsession = require("gittools.util.diffsession")
+local diffthis    = require("gittools.diffthis")
+local logtool     = require("gittools.log")
+local blame       = require("gittools.blame")
+local merge       = require("gittools.merge")
 
 -- Required lazily, on first completion: `M.complete` is the only user, and the
 -- cache keeps the `require` lookup off every keystroke.
@@ -40,7 +41,7 @@ end
 ---   GitTool stashlist                         browse `git stash list` the
 ---                                             same way as log
 ---   GitTool reflog [<ref>]                    browse `git reflog` the same
----                  [<opt>...]                 way, HEAD by default; <opt> is
+---                  [<opt>...]                 way, HEAD by default; <opt> is 
 ---                                             -n or --since
 ---   GitTool blame                             annotate the current buffer in
 ---                                             a scroll-bound blame sidebar
@@ -49,6 +50,8 @@ end
 ---                                             none, meaning the current
 ---                                             buffer) the other three sides
 ---                                             are read from its index stages
+---   GitTool refresh                           re-read the session the current
+---                                             buffer belongs to, in place
 --- This module owns only argument parsing and completion, as `M.run` and
 --- `M.complete`; the command itself is registered in `plugin/gittools.lua`,
 --- and the work lives in `gittools.diff` / `gittools.diffpaths` /
@@ -225,6 +228,21 @@ function M.run(_, args)
                 .. "exactly four ($LOCAL $BASE $REMOTE $MERGED)",
                 vim.log.levels.ERROR)
         end
+    elseif sub == "refresh" then
+        if args[2] then
+            _notify("GitTool refresh takes no arguments", vim.log.levels.ERROR)
+            return
+        end
+        local handled = false
+        for _, view in ipairs({ diffsession, diffthis, blame, logtool }) do
+            if view.is_active() then
+                view.refresh()
+                handled = true
+            end
+        end
+        if not handled then
+            _notify("No gittools session for the current buffer", vim.log.levels.WARN)
+        end
     else
         vim.api.nvim_echo({{"Argument required", "Error"}}, false, {})
     end
@@ -236,7 +254,7 @@ end
 function M.complete(_, rest, arg_lead)
     if #rest == 0 then
         return { "diff", "diffpaths", "diffthis", "log", "logthis", "graph",
-            "stashlist", "reflog", "blame", "merge" }
+            "stashlist", "reflog", "blame", "merge", "refresh" }
     end
 
     local sub = rest[1]

@@ -29,6 +29,17 @@ local function _blob_lines(blob)
     return vim.split(blob, "\n", { plain = true })
 end
 
+--- The git side's lines: `rev:rel`, or the index stage when `rev` is nil.
+---@param root string
+---@param rev  string?
+---@param rel  string
+---@return string[]
+local function _git_lines(root, rev, rel)
+    local spec = rev and (rev .. ":" .. rel) or (":" .. rel)
+    local blob = git.run_raw(root, { "show", spec })
+    return blob and _blob_lines(blob) or {}
+end
+
 --- The active diffthis session. Only one exists at a time. nil when idle.
 ---@class GitTools.DiffThisSession
 ---@field buf      integer   the live file buffer
@@ -36,6 +47,9 @@ end
 ---@field group    integer   the session's autocmd group
 ---@field base_win? number
 ---@field cur_win?  number
+---@field root     string    repo root
+---@field rel      string    the file's path in the repo
+---@field rev?     string?   revision compared against; nil = the index
 ---@type GitTools.DiffThisSession?
 local _session = nil
 
@@ -107,9 +121,7 @@ local function _diffthis(opts)
         return
     end
 
-    local spec = rev and (rev .. ":" .. rel) or (":" .. rel)
-    local blob = git.run_raw(root, { "show", spec })
-    local base_lines = blob and _blob_lines(blob) or {}
+    local base_lines = _git_lines(root, rev, rel)
 
     local base = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(base, 0, -1, false, base_lines)
@@ -131,7 +143,16 @@ local function _diffthis(opts)
 
     local group = vim.api.nvim_create_augroup(
         ("gittools.diffthis.%d"):format(base), { clear = true })
-    local session = { buf = buf, base = base, group = group, cur_win = cur_win, base_win = base_win }
+    local session = {
+        buf      = buf,
+        base     = base,
+        group    = group,
+        cur_win  = cur_win,
+        base_win = base_win,
+        root     = root,
+        rel      = rel,
+        rev      = rev,
+    }
     _session = session
 
     keyhelp.map(base, {}, {
@@ -160,6 +181,51 @@ local function _diffthis(opts)
             _end_diff()
         end,
     })
+end
+
+--- Whether the current buffer belongs to a live diffthis session.
+---@return boolean
+function M.is_active()
+    local s = _session
+    if not s then return false end
+    local buf = vim.api.nvim_get_current_buf()
+    return buf == s.buf or buf == s.base
+end
+
+--- Refresh the active session's git side from the repository, keeping each
+--- pane's cursor line where it still exists.
+function M.refresh()
+    if not M.is_active() then return end
+    local s = _session
+    ---@cast s GitTools.DiffThisSession
+    if not (s.base and vim.api.nvim_buf_is_valid(s.base)) then return end
+
+    local lines = _git_lines(s.root, s.rev, s.rel)
+    local base = s.base
+    ---@cast base integer
+
+    local views = {}
+    for _, win in ipairs(vim.fn.win_findbuf(base)) do
+        views[win] = vim.api.nvim_win_call(win, vim.fn.winsaveview)
+    end
+
+    vim.bo[base].modifiable = true
+    vim.api.nvim_buf_set_lines(base, 0, -1, false, lines)
+    vim.bo[base].modifiable = false
+    vim.bo[base].modified   = false
+
+    for win, view in pairs(views) do
+        if vim.api.nvim_win_is_valid(win) then
+            local lnum = math.max(1, math.min(view.lnum or 1, #lines))
+            view.lnum    = lnum
+            view.topline = math.max(1, math.min(view.topline or 1, lnum))
+            vim.api.nvim_win_call(win, function()
+                vim.fn.winrestview(view)
+                vim.cmd("diffupdate")
+            end)
+        end
+    end
+    return true
 end
 
 --- Diff the current buffer against `opts.rev` (default: the index).

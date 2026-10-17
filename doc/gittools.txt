@@ -16,8 +16,9 @@ Table of Contents                                 *gittools-table-of-contents*
 11. GitTool merge                                             |gittools-merge|
   - Maps                                                       |gittools-maps|
   - Base text                                             |gittools-base-text|
-12. Highlights                                           |gittools-highlights|
-13. License                                                 |gittools-license|
+12. GitTool refresh                                         |gittools-refresh|
+13. Highlights                                           |gittools-highlights|
+14. License                                                 |gittools-license|
 
   [!NOTE] **Work in progress.** Stable and usable as it stands, but still
   evolving: changes, including breaking ones, can land at any time. Pin a commit
@@ -56,6 +57,9 @@ A git-backed front end for Neovim’s native diff facilities, under a single
                                                            scroll-bound sidebar
 
   GitTool merge [<file> \| $LOCAL $BASE $REMOTE $MERGED]   resolve merge conflicts inline
+
+  GitTool refresh                                          re-read the session the current
+                                                           buffer belongs to
   --------------------------------------------------------------------------------------------
 Tab behaviour:
 
@@ -585,7 +589,25 @@ BASE TEXT                                                 *gittools-base-text*
 
 
 ==============================================================================
-12. Highlights                                           *gittools-highlights*
+12. GitTool refresh                                         *gittools-refresh*
+
+Re-reads the session the current buffer belongs to, in place:
+
+- `diff` / `diffpaths`: recollects the changed files and redraws the list; the
+    cursor stays on the same path when it still differs.
+- `diffthis`: re-fetches the git side. The live buffer is untouched.
+- `blame`: re-runs the blame of the level on screen.
+- `log`, `logthis`, `graph`, `stashlist`, `reflog`: re-runs the query; the mark
+    and the cursor’s entry stay where they still exist.
+- No session: reports that there is nothing to refresh.
+
+>vim
+    :GitTool refresh
+<
+
+
+==============================================================================
+13. Highlights                                           *gittools-highlights*
 
 All link to defaults and can be overridden by a colorscheme.
 
@@ -608,7 +630,7 @@ All link to defaults and can be overridden by a colorscheme.
   -----------------------------------------------------------------------
 
 ==============================================================================
-13. License                                                 *gittools-license*
+14. License                                                 *gittools-license*
 
 MIT <LICENSE>.
 
