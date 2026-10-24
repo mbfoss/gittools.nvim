@@ -12,7 +12,7 @@ vim.o.signcolumn = "yes"
 vim.o.cursorline = true
 vim.o.updatetime = 100
 
-vim.opt.rtp:append(here .. "/..")
+vim.opt.rtp:append(here .. "/../..")
 vim.cmd("runtime plugin/gittools.lua")
 
 require("nvim_demo").setup()

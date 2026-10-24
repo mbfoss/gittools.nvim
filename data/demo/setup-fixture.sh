@@ -1,14 +1,14 @@
 #!/usr/bin/env sh
 # Build the throwaway repository the demo scenes record in.
 #
-#   demo/setup-fixture.sh [DIR]        # default: demo/fixture
+#   data/demo/setup-fixture.sh [DIR]        # default: data/demo/fixture
 #
 # Authors, dates and contents are fixed, so recordings are reproducible.
 
 set -eu
 
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-dir=${1:-$root/demo/fixture}
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+dir=${1:-$root/data/demo/fixture}
 
 rm -rf "$dir"
 mkdir -p "$dir/lua"

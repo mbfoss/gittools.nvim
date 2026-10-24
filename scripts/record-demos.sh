@@ -1,16 +1,16 @@
 #!/usr/bin/env sh
-# Record the README demos from demo/*.scene with nvim-demo.
+# Record the README demos from data/demo/*.scene with nvim-demo.
 #
 #   scripts/record-demos.sh                    # every scene
-#   scripts/record-demos.sh demo/graph.scene   # just one
+#   scripts/record-demos.sh data/demo/graph.scene   # just one
 #
-# Each scene writes its GIF and cast to demo-out/. Needs nvim, agg and pyte.
+# Each scene writes its GIF and cast to data/demo-out/. Needs nvim, agg and pyte.
 # nvim-demo (https://github.com/mbfoss/nvim-demo-generator) is cloned into
 # $XDG_CACHE_HOME/gittools.nvim when missing. Set NVIM_DEMO to a checkout's
 # bin/nvim-demo to use that instead.
 #
-# The scenes record in demo/fixture, a throwaway repository rebuilt from
-# demo/setup-fixture.sh before recording. Neither directory is tracked.
+# The scenes record in data/demo/fixture, a throwaway repository rebuilt from
+# data/demo/setup-fixture.sh before recording. Neither directory is tracked.
 
 set -eu
 
@@ -28,10 +28,10 @@ else
     fi
 fi
 
-"$root/demo/setup-fixture.sh" "$root/demo/fixture"
+"$root/data/demo/setup-fixture.sh" "$root/data/demo/fixture"
 
 if [ "$#" -eq 0 ]; then
-    set -- "$root"/demo/*.scene
+    set -- "$root"/data/demo/*.scene
 fi
 
 for scene in "$@"; do

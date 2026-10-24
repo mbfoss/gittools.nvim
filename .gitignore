@@ -1,4 +1,4 @@
 .luarc.json
-/demo-out
-/demo/fixture
+/data/demo-out
+/data/demo/fixture
 .DS_Store
